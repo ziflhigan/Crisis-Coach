@@ -68,6 +68,7 @@ dependencies {
     kapt(libs.objectbox.processor)
 
     implementation(libs.tasks.text)
+    implementation(libs.tasks.genai)
 
     implementation(libs.coil.compose)
     implementation(libs.kotlinx.coroutines.android)

@@ -20,6 +20,7 @@ litertSupportApi = "1.4.0"
 navigationCompose = "2.9.2"
 objectboxAndroid = "4.3.0"
 objectboxProcessor = "4.3.0"
+tasksGenai = "0.10.25"
 tasksText = "0.20230731"
 
 [libraries]
@@ -52,6 +53,7 @@ litert-gpu-api = { module = "com.google.ai.edge.litert:litert-gpu-api", version.
 litert-support-api = { module = "com.google.ai.edge.litert:litert-support-api", version.ref = "litertSupportApi" }
 objectbox-android = { module = "io.objectbox:objectbox-android", version.ref = "objectboxAndroid" }
 objectbox-processor = { module = "io.objectbox:objectbox-processor", version.ref = "objectboxProcessor" }
+tasks-genai = { module = "com.google.mediapipe:tasks-genai", version.ref = "tasksGenai" }
 tasks-text = { module = "com.google.mediapipe:tasks-text", version.ref = "tasksText" }
 
 [plugins]
