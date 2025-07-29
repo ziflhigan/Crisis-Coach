@@ -21,7 +21,7 @@ navigationCompose = "2.9.2"
 objectboxAndroid = "4.3.0"
 objectboxProcessor = "4.3.0"
 tasksGenai = "0.10.25"
-tasksText = "0.20230731"
+tasksText = "0.10.26"
 
 [libraries]
 accompanist-permissions = { module = "com.google.accompanist:accompanist-permissions", version.ref = "accompanistPermissions" }
