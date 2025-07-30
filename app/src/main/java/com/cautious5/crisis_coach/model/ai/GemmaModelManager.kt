@@ -63,6 +63,9 @@ class GemmaModelManager private constructor(
     private var textSession: LlmInferenceSession? = null
     private var visionSession: LlmInferenceSession? = null
 
+    private var textSessionConfig: ModelConfig? = null
+    private var visionSessionConfig: ModelConfig? = null
+
     /**
      * Initializes the model with the specified configuration using MediaPipe
      */
@@ -93,7 +96,7 @@ class GemmaModelManager private constructor(
     /**
      * Generates streaming text response from text input
      */
-    suspend fun generateText(
+    fun generateText(
         prompt: String,
         maxTokens: Int? = null,
         temperature: Float? = null
@@ -118,9 +121,13 @@ class GemmaModelManager private constructor(
                 var fullResponse = ""
                 var tokenCount = 0
 
-                // Create session if needed
-                if (textSession == null) {
-                    textSession = createTextSession(maxTokens, temperature)
+                // Recreate session if config changes
+                val currentModelConfig = _currentConfig.value
+                if (textSession == null || currentModelConfig != textSessionConfig) {
+                    Log.d(TAG, "Creating new text session. Reason: New session or config change.")
+                    textSession?.close() // Close old session if it exists
+                    textSession = createTextSession(currentModelConfig)
+                    textSessionConfig = currentModelConfig // Store the config used
                 }
 
                 // Add query and generate streaming response
@@ -197,9 +204,13 @@ class GemmaModelManager private constructor(
                 val processedImage = preprocessImage(image)
                 val mpImage = BitmapImageBuilder(processedImage).build()
 
-                // Create vision session if needed
-                if (visionSession == null) {
-                    visionSession = createVisionSession(maxTokens)
+                // Recreate session if config changes
+                val currentModelConfig = _currentConfig.value
+                if (visionSession == null || currentModelConfig != visionSessionConfig) {
+                    Log.d(TAG, "Creating new vision session. Reason: New session or config change.")
+                    visionSession?.close() // Close old session
+                    visionSession = createVisionSession(currentModelConfig)
+                    visionSessionConfig = currentModelConfig // Store the config used
                 }
 
                 // Add query and image
@@ -244,6 +255,9 @@ class GemmaModelManager private constructor(
             textSession = null
             visionSession = null
             llmInference = null
+
+            textSessionConfig = null
+            visionSessionConfig = null
 
             _modelState.value = ModelState.UNINITIALIZED
             _currentConfig.value = null
@@ -296,13 +310,13 @@ class GemmaModelManager private constructor(
     /**
      * Creates a text-only session
      */
-    private fun createTextSession(maxTokens: Int?, temperature: Float?): LlmInferenceSession {
+    private fun createTextSession(config: ModelConfig?): LlmInferenceSession {
         val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
             .apply {
-                temperature?.let { setTemperature(it) }
-                _currentConfig.value?.let { config ->
-                    setTopK(config.topK)
-                    setTopP(config.topP)
+                config?.let {
+                    setTemperature(it.temperature)
+                    setTopK(it.topK)
+                    setTopP(it.topP)
                 }
             }
             .build()
@@ -313,13 +327,13 @@ class GemmaModelManager private constructor(
     /**
      * Creates a vision-enabled session
      */
-    private fun createVisionSession(maxTokens: Int?): LlmInferenceSession {
+    private fun createVisionSession(config: ModelConfig?): LlmInferenceSession {
         val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
             .apply {
-                _currentConfig.value?.let { config ->
-                    setTemperature(config.temperature)
-                    setTopK(config.topK)
-                    setTopP(config.topP)
+                config?.let {
+                    setTemperature(it.temperature)
+                    setTopK(it.topK)
+                    setTopP(it.topP)
                 }
                 // Enable vision modality
                 setGraphOptions(

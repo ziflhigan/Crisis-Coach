@@ -157,7 +157,10 @@ class ModelLoader(private val context: Context) {
                 Log.d(TAG, "Model copied successfully to: $targetPath")
                 targetPath
             } else {
-                Log.e(TAG, "Copied model file is invalid")
+                val sourceSize = sourceFile.length()
+                val targetSize = targetFile.length()
+                Log.e(TAG, "Copied model file is invalid. " +
+                        "Source size: $sourceSize bytes, Target size: $targetSize bytes. Deleting.")
                 targetFile.delete()
                 null
             }
