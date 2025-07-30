@@ -14,6 +14,10 @@ android {
     namespace = "com.cautious5.crisis_coach"
     compileSdk = 35
 
+    androidResources {
+        noCompress.add("tflite")
+    }
+
     defaultConfig {
         applicationId = "com.cautious5.crisis_coach"
         minSdk = 30
@@ -68,7 +72,10 @@ dependencies {
     implementation(libs.androidx.exifinterface)
     kapt(libs.objectbox.processor)
 
-    implementation(libs.icons.lucide)
+    implementation(libs.androidx.material.icons.extended)
+    implementation(libs.icons.lucide.android)
+    implementation(libs.fontawesomecompose)
+
     implementation(libs.androidx.core.splashscreen)
 
     implementation(libs.tasks.text)
