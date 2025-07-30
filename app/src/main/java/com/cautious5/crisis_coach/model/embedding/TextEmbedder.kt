@@ -3,6 +3,7 @@ package com.cautious5.crisis_coach.model.embedding
 import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
+import com.cautious5.crisis_coach.utils.VectorUtils
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.text.textembedder.TextEmbedder as MediaPipeTextEmbedder
 import kotlinx.coroutines.Dispatchers
@@ -46,7 +47,7 @@ class TextEmbedder private constructor(
     /**
      * Initializes the MediaPipe TextEmbedder
      */
-    private suspend fun initialize(): EmbedderResult<Unit> = withContext(Dispatchers.IO) {
+    suspend fun initialize(): EmbedderResult<Unit> = withContext(Dispatchers.IO) {
         initializationMutex.withLock {
             if (isInitialized) {
                 return@withContext EmbedderResult.Success(Unit)
@@ -141,7 +142,7 @@ class TextEmbedder private constructor(
     /**
      * Generates embeddings for multiple texts in batch
      */
-    private suspend fun embedTextBatch(texts: List<String>): List<FloatArray> = withContext(Dispatchers.IO) {
+    suspend fun embedTextBatch(texts: List<String>): List<FloatArray> = withContext(Dispatchers.IO) {
         if (texts.isEmpty()) {
             return@withContext emptyList()
         }
@@ -173,12 +174,12 @@ class TextEmbedder private constructor(
     /**
      * Calculates similarity between two text embeddings
      */
-    private fun calculateSimilarity(embedding1: FloatArray, embedding2: FloatArray): Float {
+    fun calculateSimilarity(embedding1: FloatArray, embedding2: FloatArray): Float {
         if (embedding1.isEmpty() || embedding2.isEmpty() || embedding1.size != embedding2.size) {
             return 0f
         }
 
-        return calculateCosineSimilarity(embedding1, embedding2)
+        return VectorUtils.calculateCosineSimilarity(embedding1, embedding2)
     }
 
     /**
@@ -279,28 +280,6 @@ class TextEmbedder private constructor(
                 Log.e(TAG, "Error releasing TextEmbedder resources: ${e.message}", e)
             }
         }
-    }
-
-    // Private helper methods
-
-    /**
-     * Calculates cosine similarity between two vectors
-     */
-    private fun calculateCosineSimilarity(vector1: FloatArray, vector2: FloatArray): Float {
-        if (vector1.size != vector2.size) return 0f
-
-        var dotProduct = 0f
-        var norm1 = 0f
-        var norm2 = 0f
-
-        for (i in vector1.indices) {
-            dotProduct += vector1[i] * vector2[i]
-            norm1 += vector1[i] * vector1[i]
-            norm2 += vector2[i] * vector2[i]
-        }
-
-        val magnitude = kotlin.math.sqrt(norm1) * kotlin.math.sqrt(norm2)
-        return if (magnitude > 0f) dotProduct / magnitude else 0f
     }
 }
 

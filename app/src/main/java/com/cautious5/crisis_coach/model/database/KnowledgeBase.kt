@@ -4,10 +4,10 @@ import android.util.Log
 import com.cautious5.crisis_coach.model.database.entities.EmergencyInfo
 import com.cautious5.crisis_coach.model.database.entities.EmergencyInfo_
 import com.cautious5.crisis_coach.model.embedding.TextEmbedder
+import com.cautious5.crisis_coach.utils.VectorUtils
 import io.objectbox.Box
 import io.objectbox.BoxStore
 import io.objectbox.kotlin.boxFor
-import io.objectbox.kotlin.query
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -67,7 +67,7 @@ class KnowledgeBase(
             val results = queryBuilder.build().find()
             // Convert to search entries with relevance scoring
             val searchEntries = results.mapNotNull { info ->
-                val similarity = calculateCosineSimilarity(queryEmbedding, info.embedding)
+                val similarity = VectorUtils.calculateCosineSimilarity(queryEmbedding, info.embedding)
 
                 // Filter by similarity threshold
                 if (similarity >= SIMILARITY_THRESHOLD) {
@@ -245,22 +245,25 @@ class KnowledgeBase(
     }
 
     /**
-     * Gets knowledge base statistics
+     * Gets knowledge base statistics.
+     * This version is optimized to query the database only once.
      */
     suspend fun getStatistics(): KnowledgeBaseStats = withContext(Dispatchers.IO) {
         try {
-            val totalEntries = emergencyInfoBox.count()
+            // Fetch all entries from the database in a single operation
+            val allEntries = emergencyInfoBox.all
+            val totalEntries = allEntries.size.toLong()
 
-            // Count by category
-            val categories = emergencyInfoBox.all.groupBy { it.category }
+            Log.d(TAG, "Generating statistics for $totalEntries entries.")
+
+            // Perform grouping operations on the in-memory list
+            val categories = allEntries.groupBy { it.category }
                 .mapValues { it.value.size }
 
-            // Count by priority
-            val priorities = emergencyInfoBox.all.groupBy { it.priority }
+            val priorities = allEntries.groupBy { it.priority }
                 .mapValues { it.value.size }
 
-            // Count by language
-            val languages = emergencyInfoBox.all.groupBy { it.languageCode }
+            val languages = allEntries.groupBy { it.languageCode }
                 .mapValues { it.value.size }
 
             KnowledgeBaseStats(
@@ -272,7 +275,7 @@ class KnowledgeBase(
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to generate statistics", e)
-            KnowledgeBaseStats()
+            KnowledgeBaseStats() // Return empty stats on error
         }
     }
 
@@ -289,26 +292,6 @@ class KnowledgeBase(
     }
 
     // Private helper methods
-
-    /**
-     * Calculates cosine similarity between two vectors
-     */
-    private fun calculateCosineSimilarity(vector1: FloatArray, vector2: FloatArray): Float {
-        if (vector1.size != vector2.size) return 0f
-
-        var dotProduct = 0f
-        var norm1 = 0f
-        var norm2 = 0f
-
-        for (i in vector1.indices) {
-            dotProduct += vector1[i] * vector2[i]
-            norm1 += vector1[i] * vector1[i]
-            norm2 += vector2[i] * vector2[i]
-        }
-
-        val magnitude = kotlin.math.sqrt(norm1) * kotlin.math.sqrt(norm2)
-        return if (magnitude > 0f) dotProduct / magnitude else 0f
-    }
 
     /**
      * Calculates overall relevance score combining similarity and other factors

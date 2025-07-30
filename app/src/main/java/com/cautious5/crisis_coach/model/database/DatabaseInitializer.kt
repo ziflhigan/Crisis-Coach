@@ -6,20 +6,19 @@ import android.util.Log
 import com.cautious5.crisis_coach.model.database.entities.EmergencyInfo
 import com.cautious5.crisis_coach.model.database.entities.EmergencyInfo.Companion.Priorities
 import com.cautious5.crisis_coach.model.embedding.TextEmbedder
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
 
 /**
  * Handles initialization and population of the emergency knowledge base
- * Loads initial data from JSON assets and generates embeddings
+ * Uses DocumentProcessor for flexible document loading
  */
 class DatabaseInitializer(
     private val context: Context,
     private val knowledgeBase: KnowledgeBase,
-    private val textEmbedder: TextEmbedder
+    private val textEmbedder: TextEmbedder,
+    private val documentProcessor: DocumentProcessor = DocumentProcessor(context)
 ) {
 
     companion object {
@@ -32,10 +31,15 @@ class DatabaseInitializer(
         // Asset file paths
         private const val INITIAL_DATA_ASSET = "data/initial_knowledge_base.json"
         private const val EMERGENCY_DATA_ASSET = "raw/emergency_knowledge.json"
+
+        // Additional document sources
+        private const val MARKDOWN_DOCS_PATH = "data/emergency_procedures.md"
+        private const val CSV_DATA_PATH = "data/medical_protocols.csv"
+
+        // ...
     }
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    private val gson = Gson()
 
     /**
      * Initializes the knowledge base if needed
@@ -66,9 +70,9 @@ class DatabaseInitializer(
             }
 
             // Load and populate initial data
-            when (val loadResult = loadInitialData()) {
-                is DataLoadResult.Success -> {
-                    Log.i(TAG, "Successfully loaded ${loadResult.entriesAdded} entries")
+            when (val loadResult = loadAllDocuments()) {
+                is LoadResult.Success -> {
+                    Log.i(TAG, "Successfully loaded ${loadResult.totalEntries} entries from ${loadResult.sourceCount} sources")
 
                     // Update version and timestamp
                     prefs.edit()
@@ -77,11 +81,12 @@ class DatabaseInitializer(
                         .apply()
 
                     InitializationResult.Success(
-                        entriesAdded = loadResult.entriesAdded,
+                        entriesAdded = loadResult.totalEntries,
+                        sourcesProcessed = loadResult.sourceCount,
                         initializationTimeMs = loadResult.processingTimeMs
                     )
                 }
-                is DataLoadResult.Error -> {
+                is LoadResult.Error -> {
                     Log.e(TAG, "Failed to load initial data: ${loadResult.message}")
                     InitializationResult.Error(loadResult.message, loadResult.cause)
                 }
@@ -119,56 +124,76 @@ class DatabaseInitializer(
     }
 
     /**
-     * Loads initial data from assets and populates the database
+     * Loads all documents from various sources
      */
-    private suspend fun loadInitialData(): DataLoadResult = withContext(Dispatchers.IO) {
-
+    private suspend fun loadAllDocuments(): LoadResult = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
+        val allEntries = mutableListOf<EmergencyInfo>()
+        val errors = mutableListOf<String>()
+        var sourceCount = 0
 
         try {
-            // Try to load from primary asset file first
-            val initialEntries = loadFromAsset(INITIAL_DATA_ASSET)
-                ?: loadFromAsset(EMERGENCY_DATA_ASSET)
-                ?: run {
-                    Log.w(TAG, "No asset files found, using default emergency data")
-                    createDefaultEmergencyData()
-                }
+            // 1. Load JSON documents
+            val jsonSources = listOf(
+                INITIAL_DATA_ASSET to DocumentProcessor.DocumentMetadata(
+                    source = "Initial Knowledge Base",
+                    format = DocumentProcessor.DocumentFormat.JSON,
+                    category = "general",
+                    priority = 3
+                ),
+                EMERGENCY_DATA_ASSET to DocumentProcessor.DocumentMetadata(
+                    source = "Emergency Knowledge",
+                    format = DocumentProcessor.DocumentFormat.JSON,
+                    category = "emergency",
+                    priority = 2
+                )
+            )
 
-            if (initialEntries.isEmpty()) {
-                return@withContext DataLoadResult.Error("No emergency data available to load")
+            jsonSources.forEach { (assetPath, metadata) ->
+                loadDocumentFromAsset(assetPath, metadata)?.let { entries ->
+                    allEntries.addAll(entries)
+                    sourceCount++
+                } ?: errors.add("Failed to load: $assetPath")
             }
 
-            Log.d(TAG, "Processing ${initialEntries.size} emergency entries")
+            // 2. Load Markdown documents (if they exist)
+            loadDocumentFromAsset(
+                MARKDOWN_DOCS_PATH,
+                DocumentProcessor.DocumentMetadata(
+                    source = "Emergency Procedures",
+                    format = DocumentProcessor.DocumentFormat.MARKDOWN,
+                    category = "procedures",
+                    priority = 2,
+                    chunkingStrategy = DocumentProcessor.ChunkingStrategy.PARAGRAPH_BASED
+                )
+            )?.let { entries ->
+                allEntries.addAll(entries)
+                sourceCount++
+            }
+
+            // 3. Load CSV data (if exists)
+            loadDocumentFromAsset(
+                CSV_DATA_PATH,
+                DocumentProcessor.DocumentMetadata(
+                    source = "Medical Protocols",
+                    format = DocumentProcessor.DocumentFormat.CSV,
+                    category = "medical",
+                    priority = 1
+                )
+            )?.let { entries ->
+                allEntries.addAll(entries)
+                sourceCount++
+            }
+
+            // If no documents loaded, create default data
+            if (allEntries.isEmpty()) {
+                Log.w(TAG, "No documents loaded from assets, using default emergency data")
+                allEntries.addAll(createDefaultEmergencyData())
+                sourceCount = 1
+            }
 
             // Generate embeddings for entries that don't have them
-            val processedEntries = mutableListOf<EmergencyInfo>()
-            var embeddingGenerationCount = 0
-
-            for (entry in initialEntries) {
-                try {
-                    if (entry.embedding.isEmpty() && entry.text.isNotBlank()) {
-                        entry.embedding = textEmbedder.embedText(entry.text)
-                        embeddingGenerationCount++
-
-                        // Log progress every 10 entries
-                        if (embeddingGenerationCount % 10 == 0) {
-                            Log.d(TAG, "Generated embeddings for $embeddingGenerationCount entries")
-                        }
-                    }
-
-                    // Validate the entry
-                    if (entry.hasValidEmbedding() && entry.text.isNotBlank()) {
-                        processedEntries.add(entry)
-                    } else {
-                        Log.w(TAG, "Skipping invalid entry: ${entry.title}")
-                    }
-
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to process entry: ${entry.title} - ${e.message}")
-                }
-            }
-
-            Log.d(TAG, "Generated embeddings for $embeddingGenerationCount entries")
+            val processedEntries = processEntriesWithEmbeddings(allEntries)
 
             // Add entries to database in batch
             val batchResult = knowledgeBase.addEmergencyInfoBatch(processedEntries)
@@ -177,70 +202,93 @@ class DatabaseInitializer(
 
             when (batchResult) {
                 is BatchAddResult.Success -> {
-                    Log.i(TAG, "Successfully added ${batchResult.successfulIds.size} entries " +
-                            "in ${processingTime}ms (${batchResult.failures.size} failures)")
-
-                    DataLoadResult.Success(
-                        entriesAdded = batchResult.successfulIds.size,
+                    LoadResult.Success(
+                        totalEntries = batchResult.successfulIds.size,
+                        sourceCount = sourceCount,
                         processingTimeMs = processingTime,
-                        failures = batchResult.failures
+                        errors = errors + batchResult.failures
                     )
                 }
                 is BatchAddResult.Error -> {
-                    DataLoadResult.Error("Batch add failed: ${batchResult.message}", batchResult.cause)
+                    LoadResult.Error("Batch add failed: ${batchResult.message}", batchResult.cause)
                 }
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load initial data", e)
-            DataLoadResult.Error("Data loading failed: ${e.message}", e)
+            Log.e(TAG, "Failed to load documents", e)
+            LoadResult.Error("Document loading failed: ${e.message}", e)
         }
     }
 
     /**
-     * Loads emergency information from an asset JSON file
+     * Loads a document from assets using DocumentProcessor
      */
-    private fun loadFromAsset(assetPath: String): List<EmergencyInfo>? {
+    private suspend fun loadDocumentFromAsset(
+        assetPath: String,
+        metadata: DocumentProcessor.DocumentMetadata
+    ): List<EmergencyInfo>? {
         return try {
-            Log.d(TAG, "Loading data from asset: $assetPath")
+            val inputStream = context.assets.open(assetPath)
 
-            val jsonString = context.assets.open(assetPath).use { inputStream ->
-                inputStream.bufferedReader().use { it.readText() }
+            when (val result = documentProcessor.processDocument(inputStream, metadata)) {
+                is DocumentProcessResult.Success -> {
+                    Log.d(TAG, "Loaded ${result.entries.size} entries from ${metadata.source}")
+                    result.entries
+                }
+                is DocumentProcessResult.Error -> {
+                    Log.w(TAG, "Failed to process ${metadata.source}: ${result.message}")
+                    null
+                }
             }
-
-            // Parse JSON to EmergencyInfo list
-            val listType = object : TypeToken<List<EmergencyDataEntry>>() {}.type
-            val dataEntries: List<EmergencyDataEntry> = gson.fromJson(jsonString, listType)
-
-            // Convert to EmergencyInfo entities
-            val result = dataEntries.map { dataEntry ->
-                EmergencyInfo(
-                    title = dataEntry.title,
-                    text = dataEntry.text,
-                    category = dataEntry.category,
-                    priority = dataEntry.priority ?: 3,
-                    keywords = dataEntry.keywords ?: "",
-                    source = dataEntry.source ?: "",
-                    languageCode = dataEntry.languageCode ?: "en",
-                    fieldSuitable = dataEntry.fieldSuitable ?: true,
-                    metadata = dataEntry.metadata ?: "{}"
-                )
-            }
-
-            Log.d(TAG, "Loaded ${result.size} entries from $assetPath")
-            result
-
         } catch (e: IOException) {
             Log.d(TAG, "Asset file not found: $assetPath")
             null
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse asset file: $assetPath", e)
+            Log.e(TAG, "Failed to load asset: $assetPath", e)
             null
         }
     }
 
     /**
-     * Creates default emergency data when no asset files are available
+     * Processes entries to ensure they have embeddings
+     */
+    private suspend fun processEntriesWithEmbeddings(
+        entries: List<EmergencyInfo>
+    ): List<EmergencyInfo> = withContext(Dispatchers.IO) {
+
+        val processedEntries = mutableListOf<EmergencyInfo>()
+        var embeddingGenerationCount = 0
+
+        entries.forEach { entry ->
+            try {
+                if (entry.embedding.isEmpty() && entry.text.isNotBlank()) {
+                    entry.embedding = textEmbedder.embedText(entry.text)
+                    embeddingGenerationCount++
+
+                    // Log progress every 10 entries
+                    if (embeddingGenerationCount % 10 == 0) {
+                        Log.d(TAG, "Generated embeddings for $embeddingGenerationCount entries")
+                    }
+                }
+
+                // Validate the entry
+                if (entry.hasValidEmbedding() && entry.text.isNotBlank()) {
+                    processedEntries.add(entry)
+                } else {
+                    Log.w(TAG, "Skipping invalid entry: ${entry.title}")
+                }
+
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to process entry: ${entry.title} - ${e.message}")
+            }
+        }
+
+        Log.d(TAG, "Processed ${processedEntries.size} entries, generated $embeddingGenerationCount embeddings")
+        processedEntries
+    }
+
+    /**
+     * Creates default emergency data when no assets are available
      */
     private fun createDefaultEmergencyData(): List<EmergencyInfo> {
         Log.d(TAG, "Creating default emergency data")
@@ -313,22 +361,46 @@ class DatabaseInitializer(
         // Consider data stale after 30 days
         return daysSinceInit > 30
     }
-}
 
-/**
- * Data structure for JSON parsing
- */
-private data class EmergencyDataEntry(
-    val title: String,
-    val text: String,
-    val category: String,
-    val priority: Int? = null,
-    val keywords: String? = null,
-    val source: String? = null,
-    val languageCode: String? = null,
-    val fieldSuitable: Boolean? = null,
-    val metadata: String? = null
-)
+    /**
+     * Adds new documents at runtime (after initial setup)
+     */
+    suspend fun addDocumentAtRuntime(
+        inputStream: java.io.InputStream,
+        metadata: DocumentProcessor.DocumentMetadata
+    ): AddDocumentResult = withContext(Dispatchers.IO) {
+
+        Log.d(TAG, "Adding document at runtime: ${metadata.source}")
+
+        try {
+            when (val result = documentProcessor.processDocument(inputStream, metadata)) {
+                is DocumentProcessResult.Success -> {
+                    // Generate embeddings
+                    val processedEntries = processEntriesWithEmbeddings(result.entries)
+
+                    // Add to database
+                    when (val batchResult = knowledgeBase.addEmergencyInfoBatch(processedEntries)) {
+                        is BatchAddResult.Success -> {
+                            AddDocumentResult.Success(
+                                entriesAdded = batchResult.successfulIds.size,
+                                source = metadata.source
+                            )
+                        }
+                        is BatchAddResult.Error -> {
+                            AddDocumentResult.Error(batchResult.message)
+                        }
+                    }
+                }
+                is DocumentProcessResult.Error -> {
+                    AddDocumentResult.Error(result.message)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to add document at runtime", e)
+            AddDocumentResult.Error("Failed to add document: ${e.message}")
+        }
+    }
+}
 
 /**
  * Result classes for initialization operations
@@ -336,6 +408,7 @@ private data class EmergencyDataEntry(
 sealed class InitializationResult {
     data class Success(
         val entriesAdded: Int,
+        val sourcesProcessed: Int,
         val initializationTimeMs: Long
     ) : InitializationResult()
 
@@ -347,15 +420,25 @@ sealed class InitializationResult {
     ) : InitializationResult()
 }
 
-private sealed class DataLoadResult {
+private sealed class LoadResult {
     data class Success(
-        val entriesAdded: Int,
+        val totalEntries: Int,
+        val sourceCount: Int,
         val processingTimeMs: Long,
-        val failures: List<String> = emptyList()
-    ) : DataLoadResult()
+        val errors: List<String> = emptyList()
+    ) : LoadResult()
 
     data class Error(
         val message: String,
         val cause: Throwable? = null
-    ) : DataLoadResult()
+    ) : LoadResult()
+}
+
+sealed class AddDocumentResult {
+    data class Success(
+        val entriesAdded: Int,
+        val source: String
+    ) : AddDocumentResult()
+
+    data class Error(val message: String) : AddDocumentResult()
 }
