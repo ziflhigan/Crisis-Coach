@@ -65,7 +65,11 @@ dependencies {
     implementation(libs.litert.gpu.api)
 
     implementation(libs.objectbox.android)
+    implementation(libs.androidx.exifinterface)
     kapt(libs.objectbox.processor)
+
+    implementation(libs.icons.lucide)
+    implementation(libs.androidx.core.splashscreen)
 
     implementation(libs.tasks.text)
     implementation(libs.tasks.genai)

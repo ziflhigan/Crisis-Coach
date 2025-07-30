@@ -4,7 +4,9 @@ agp = "8.7.3"
 cameraCore = "1.4.2"
 cameraViewfinder = "1.4.0-alpha07"
 coilCompose = "2.6.0"
+coreSplashscreen = "1.2.0-rc01"
 gson = "2.11.0"
+iconsLucide = "1.1.0"
 kotlin = "2.0.0"
 coreKtx = "1.16.0"
 junit = "4.13.2"
@@ -22,6 +24,7 @@ objectboxAndroid = "4.3.0"
 objectboxProcessor = "4.3.0"
 tasksGenai = "0.10.25"
 tasksText = "0.10.26"
+exifinterface = "1.4.1"
 
 [libraries]
 accompanist-permissions = { module = "com.google.accompanist:accompanist-permissions", version.ref = "accompanistPermissions" }
@@ -30,10 +33,12 @@ androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "
 androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "cameraCore" }
 androidx-camera-viewfinder = { module = "androidx.camera:camera-viewfinder", version.ref = "cameraViewfinder" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "coreSplashscreen" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycleRuntimeKtx" }
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigationCompose" }
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coilCompose" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
+icons-lucide = { module = "com.composables:icons-lucide", version.ref = "iconsLucide" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
@@ -55,6 +60,7 @@ objectbox-android = { module = "io.objectbox:objectbox-android", version.ref = "
 objectbox-processor = { module = "io.objectbox:objectbox-processor", version.ref = "objectboxProcessor" }
 tasks-genai = { module = "com.google.mediapipe:tasks-genai", version.ref = "tasksGenai" }
 tasks-text = { module = "com.google.mediapipe:tasks-text", version.ref = "tasksText" }
+androidx-exifinterface = { group = "androidx.exifinterface", name = "exifinterface", version.ref = "exifinterface" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
