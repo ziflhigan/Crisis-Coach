@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import com.cautious5.crisis_coach.model.ai.GemmaModelManager
 import com.cautious5.crisis_coach.model.ai.GenerationResult
+import com.cautious5.crisis_coach.utils.PromptUtils
+import com.cautious5.crisis_coach.utils.ResponseParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -153,7 +155,7 @@ class TranslationService(
      * Translates text using the Gemma model with full streaming support
      * Returns a Flow that emits translation progress
      */
-    private fun translateTextStreaming(
+    fun translateTextStreaming(
         text: String,
         sourceLanguage: String,
         targetLanguage: String,
@@ -179,7 +181,7 @@ class TranslationService(
                 Log.d(TAG, "Translation attempt ${attempt + 1}/$MAX_TRANSLATION_RETRIES")
 
                 try {
-                    var accumulatedText = ""
+                    var accumulatedText: String
 
                     gemmaModelManager.generateText(prompt).collect { result ->
                         when (result) {
@@ -187,22 +189,16 @@ class TranslationService(
                                 accumulatedText = result.text
 
                                 // Try to parse the current accumulated text
-                                val parsedResult = parseTranslationResponse(accumulatedText, includePronunciation)
+                                val parsed = ResponseParser.parseTranslationResponse(accumulatedText, includePronunciation)
 
-                                if (parsedResult != null) {
-                                    // Emit the current progress
-                                    emit(TextTranslationResult.Success(
-                                        translatedText = parsedResult.translatedText,
-                                        pronunciationGuide = parsedResult.pronunciationGuide,
-                                        isComplete = false // Indicate this might be partial
-                                    ))
+                                val parsedResult = TextTranslationResult.Success(
+                                    translatedText = parsed.translatedText,
+                                    pronunciationGuide = parsed.pronunciationGuide
+                                )
 
-                                    // Store the final result
-                                    successfulResult = TextTranslationResult.Success(
-                                        translatedText = parsedResult.translatedText,
-                                        pronunciationGuide = parsedResult.pronunciationGuide,
-                                        isComplete = true
-                                    )
+                                if (parsedResult.translatedText.isNotBlank()) {
+                                    emit(parsedResult.copy(isComplete = false)) // Emit progress
+                                    successfulResult = parsedResult.copy(isComplete = true) // Store final result
                                 }
                             }
                             is GenerationResult.Error -> {
@@ -242,7 +238,7 @@ class TranslationService(
      * Non-streaming version that returns the final result
      * (for backwards compatibility)
      */
-    private suspend fun translateText(
+    suspend fun translateText(
         text: String,
         sourceLanguage: String,
         targetLanguage: String,
@@ -385,77 +381,12 @@ class TranslationService(
         targetLanguage: String,
         includePronunciation: Boolean
     ): String {
-        val sourceLangName = getLanguageName(sourceLanguage)
-        val targetLangName = getLanguageName(targetLanguage)
-
-        val basePrompt = """
-            Translate the following $sourceLangName text to $targetLangName accurately and naturally:
-            
-            "$text"
-        """.trimIndent()
-
-        return if (includePronunciation) {
-            """
-            $basePrompt
-            
-            Please provide:
-            1. The translation in $targetLangName
-            2. A pronunciation guide in $sourceLangName script to help pronounce the $targetLangName translation
-            
-            Format your response as:
-            Translation: [translated text]
-            Pronunciation: [pronunciation guide]
-            """.trimIndent()
-        } else {
-            "$basePrompt\n\nProvide only the translation:"
-        }
-    }
-
-    /**
-     * Parses the translation response from Gemma
-     */
-    private fun parseTranslationResponse(
-        response: String,
-        hasPronunciation: Boolean
-    ): TextTranslationResult.Success? {
-
-        return try {
-            if (hasPronunciation) {
-                // Parse structured response with pronunciation
-                val translationMatch = Regex("Translation:\\s*(.+?)(?=\\n|Pronunciation:|$)", RegexOption.DOT_MATCHES_ALL)
-                    .find(response)
-                val pronunciationMatch = Regex("Pronunciation:\\s*(.+?)$", RegexOption.DOT_MATCHES_ALL)
-                    .find(response)
-
-                val translation = translationMatch?.groupValues?.get(1)?.trim()
-                val pronunciation = pronunciationMatch?.groupValues?.get(1)?.trim()
-
-                if (!translation.isNullOrBlank()) {
-                    TextTranslationResult.Success(
-                        translatedText = translation,
-                        pronunciationGuide = pronunciation
-                    )
-                } else {
-                    // Fallback: use entire response as translation
-                    TextTranslationResult.Success(
-                        translatedText = response.trim(),
-                        pronunciationGuide = null
-                    )
-                }
-            } else {
-                // Simple translation without pronunciation
-                TextTranslationResult.Success(
-                    translatedText = response.trim(),
-                    pronunciationGuide = null
-                )
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse structured response, using raw text: ${e.message}")
-            TextTranslationResult.Success(
-                translatedText = response.trim(),
-                pronunciationGuide = null
-            )
-        }
+        return PromptUtils.buildTranslationPrompt(
+            text = text,
+            sourceLanguage = sourceLanguage,
+            targetLanguage = targetLanguage,
+            includePronunciation = includePronunciation
+        )
     }
 
     /**

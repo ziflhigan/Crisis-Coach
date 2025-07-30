@@ -108,15 +108,13 @@ class TextToSpeechService(private val context: Context) {
             val utteranceId = "${UTTERANCE_ID_PREFIX}${++utteranceIdCounter}"
 
             // Create result channel
-            speechResultChannel = Channel<SpeechSynthesisResult>(capacity = 1)
+            speechResultChannel = Channel(capacity = 1)
 
             // Set up utterance progress listener
             textToSpeech?.setOnUtteranceProgressListener(createUtteranceProgressListener(utteranceId))
 
             // Start speaking
-            val result = textToSpeech?.speak(text, queueMode, null, utteranceId)
-
-            return when (result) {
+            return when (val result = textToSpeech?.speak(text, queueMode, null, utteranceId)) {
                 TextToSpeech.SUCCESS -> {
                     // Wait for completion
                     speechResultChannel!!.receive()
@@ -160,9 +158,7 @@ class TextToSpeechService(private val context: Context) {
         val tts = textToSpeech ?: return LanguageSetResult.Error("TTS not initialized")
 
         return try {
-            val result = tts.setLanguage(locale)
-
-            when (result) {
+            when (val result = tts.setLanguage(locale)) {
                 TextToSpeech.LANG_AVAILABLE,
                 TextToSpeech.LANG_COUNTRY_AVAILABLE,
                 TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE -> {
