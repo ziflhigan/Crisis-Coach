@@ -5,8 +5,9 @@ cameraCore = "1.4.2"
 cameraViewfinder = "1.4.0-alpha07"
 coilCompose = "2.6.0"
 coreSplashscreen = "1.2.0-rc01"
+fontawesomecompose = "1.0.0"
 gson = "2.11.0"
-iconsLucide = "1.1.0"
+iconsLucideAndroid = "1.1.0"
 kotlin = "2.0.0"
 coreKtx = "1.16.0"
 junit = "4.13.2"
@@ -35,10 +36,12 @@ androidx-camera-viewfinder = { module = "androidx.camera:camera-viewfinder", ver
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "coreSplashscreen" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycleRuntimeKtx" }
+androidx-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigationCompose" }
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coilCompose" }
+fontawesomecompose = { module = "com.github.Gurupreet:FontAwesomeCompose", version.ref = "fontawesomecompose" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
-icons-lucide = { module = "com.composables:icons-lucide", version.ref = "iconsLucide" }
+icons-lucide-android = { module = "com.composables:icons-lucide-android", version.ref = "iconsLucideAndroid" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
