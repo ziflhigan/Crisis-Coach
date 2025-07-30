@@ -110,6 +110,42 @@ class ImageAnalysisService(
         }
     }
 
+    /**
+     * Analyzes an image for general purposes, providing observations and safety advice.
+     */
+    suspend fun analyzeGeneralImage(
+        image: Bitmap,
+        question: String
+    ): GeneralAnalysisResult = withContext(Dispatchers.IO) {
+        Log.d(TAG, "Starting general image analysis")
+        _analysisState.value = AnalysisState.ANALYZING
+
+        val processedImage = ImageUtils.preprocessBitmap(image)
+        val prompt = PromptUtils.buildGeneralImageAnalysisPrompt(question)
+
+        when (val analysisResult = performImageAnalysis(processedImage, prompt)) {
+            is ImageAnalysisResult.Success -> {
+                Log.d(TAG, "Parsing general response.")
+                val analysis = analysisResult.analysis
+                val observations = ResponseParser.extractKeyFindings(analysis)
+                val actions = ResponseParser.extractActionItems(analysis)
+
+                _analysisState.value = AnalysisState.IDLE
+                GeneralAnalysisResult.Success(
+                    description = analysis,
+                    keyObservations = observations,
+                    suggestedActions = actions,
+                    confidenceLevel = analysisResult.confidence,
+                    analysisTimeMs = analysisResult.analysisTimeMs
+                )
+            }
+            is ImageAnalysisResult.Error -> {
+                _analysisState.value = AnalysisState.IDLE
+                GeneralAnalysisResult.Error(analysisResult.message, analysisResult.cause)
+            }
+        }
+    }
+
     private suspend fun performImageAnalysis(
         image: Bitmap,
         prompt: String
@@ -189,4 +225,16 @@ sealed class StructuralAnalysisResult {
     ) : StructuralAnalysisResult()
 
     data class Error(val message: String, val cause: Throwable? = null) : StructuralAnalysisResult()
+}
+
+sealed class GeneralAnalysisResult {
+    data class Success(
+        val description: String,
+        val keyObservations: List<String>,
+        val suggestedActions: List<String>,
+        val confidenceLevel: Float,
+        val analysisTimeMs: Long
+    ) : GeneralAnalysisResult()
+
+    data class Error(val message: String, val cause: Throwable? = null) : GeneralAnalysisResult()
 }
