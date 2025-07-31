@@ -10,9 +10,15 @@ import android.os.Build
 import android.os.Environment
 import android.util.Log
 import com.cautious5.crisis_coach.model.ai.ModelVariant
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 class ModelDownloader(
     private val context: Context,
@@ -22,6 +28,8 @@ class ModelDownloader(
     companion object {
         private const val TAG = "ModelDownloader"
     }
+
+    private var progressJob: Job? = null
 
     private val _downloadProgress = MutableStateFlow<DownloadState>(DownloadState.Idle)
     val downloadProgress: StateFlow<DownloadState> = _downloadProgress.asStateFlow()
@@ -47,6 +55,16 @@ class ModelDownloader(
         }
     }
 
+    private fun startProgressPolling() {
+        progressJob?.cancel() // avoid duplicates
+        progressJob = CoroutineScope(Dispatchers.IO).launch {
+            while (isActive && currentDownloadId != null) {
+                checkDownloadStatus(currentDownloadId!!) // updates StateFlow
+                delay(1000)
+            }
+        }
+    }
+
     fun startDownload(modelVariant: ModelVariant) {
         val cookies = authManager.getStoredCookies()
         val token = authManager.getToken()
@@ -66,6 +84,7 @@ class ModelDownloader(
         val request = DownloadManager.Request(Uri.parse(downloadUrl))
             .setTitle("Downloading ${modelVariant.displayName}")
             .setDescription("Crisis Coach AI Model")
+            .addRequestHeader("Cookie", cookies)
             .addRequestHeader("Authorization", "Bearer $token") // USE BEARER TOKEN
             .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, fileName) // USE APP-SPECIFIC DIR
             .setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI or DownloadManager.Request.NETWORK_MOBILE)
@@ -74,7 +93,7 @@ class ModelDownloader(
 
         // Register receiver
         val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Context.RECEIVER_NOT_EXPORTED
+            Context.RECEIVER_EXPORTED
         } else {
             0
         }
@@ -86,6 +105,7 @@ class ModelDownloader(
 
         // Enqueue
         currentDownloadId = downloadManager.enqueue(request)
+        startProgressPolling()
         Log.d(TAG, "Download enqueued with ID: $currentDownloadId")
 
         // Poll status immediately to catch instant failures
@@ -117,6 +137,7 @@ class ModelDownloader(
                     _downloadProgress.value = DownloadState.InProgress(progress, bytesDownloaded, totalSize)
                 }
                 DownloadManager.STATUS_SUCCESSFUL -> {
+                    Log.i(TAG, "Saved to $localUri")
                     _downloadProgress.value = DownloadState.Completed(localUri ?: "")
                     cleanup()
                 }
@@ -133,6 +154,9 @@ class ModelDownloader(
                         DownloadManager.ERROR_UNKNOWN -> "Unknown error"
                         else -> "Download failed (reason: $reason)"
                     }
+                    Log.e(TAG, "DM failed – reason=$reason (0x${reason.toString(16)}), " +
+                            "status=${cursor.getInt(statusIndex)}, " +
+                            "localUri=$localUri")
                     _downloadProgress.value = DownloadState.Failed(errorMessage)
                     cleanup()
                 }
@@ -142,6 +166,7 @@ class ModelDownloader(
     }
 
     private fun cleanup() {
+        progressJob?.cancel()
         try {
             context.unregisterReceiver(downloadReceiver)
         } catch (e: IllegalArgumentException) {

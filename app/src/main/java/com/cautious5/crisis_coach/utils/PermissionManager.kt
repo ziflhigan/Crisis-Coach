@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.core.content.ContextCompat
 import com.cautious5.crisis_coach.utils.Constants.LogTags
 
@@ -385,4 +386,8 @@ fun rememberPermissionState(
     }
 
     return hasPermission
+}
+
+val LocalPermissionManager = staticCompositionLocalOf<PermissionManager> {
+    error("No PermissionManager provided")
 }
