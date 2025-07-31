@@ -95,8 +95,12 @@ class ModelLoader(private val context: Context) {
      * Gets the path for model in external storage (Downloads)
      */
     private fun getExternalModelPath(variant: ModelVariant): String {
-        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        return File(downloadsDir, variant.fileName).absolutePath
+        // This returns something like
+        // /storage/emulated/0/Android/data/com.cautious5.crisis_coach/files/Download
+        val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            ?: throw IllegalStateException("External files dir unavailable")
+
+        return File(dir, variant.fileName).absolutePath
     }
 
     /**
