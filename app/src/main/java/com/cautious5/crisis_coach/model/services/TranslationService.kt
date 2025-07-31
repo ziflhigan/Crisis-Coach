@@ -24,7 +24,7 @@ import java.util.Locale
 class TranslationService(
     private val context: Context,
     private val gemmaModelManager: GemmaModelManager,
-    private val speechService: SpeechService,
+    val speechService: SpeechService,
     private val textToSpeechService: TextToSpeechService
 ) {
 

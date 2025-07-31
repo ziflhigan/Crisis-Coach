@@ -54,11 +54,11 @@ class TextToSpeechService(private val context: Context) {
             textToSpeech = TextToSpeech(context) { status ->
                 when (status) {
                     TextToSpeech.SUCCESS -> {
-                        Log.i(TAG, "TextToSpeech initialized successfully")
+                        Log.i(TAG, "TextToSpeech engine initialized successfully")
                         onTTSInitialized()
                     }
                     TextToSpeech.ERROR -> {
-                        Log.e(TAG, "TextToSpeech initialization failed")
+                        Log.e(TAG, "TextToSpeech engine initialization FAILED")
                         _ttsState.value = TTSState.ERROR
                     }
                     else -> {
@@ -91,7 +91,9 @@ class TextToSpeechService(private val context: Context) {
             return SpeechSynthesisResult.Error("Text cannot be empty")
         }
 
+        Log.d(TAG, "Speak function called. TTS State: ${_ttsState.value}")
         if (_ttsState.value != TTSState.READY) {
+            Log.e(TAG, "TTS not ready, aborting speak.")
             return SpeechSynthesisResult.Error("TTS not ready. Current state: ${_ttsState.value}")
         }
 
@@ -113,8 +115,10 @@ class TextToSpeechService(private val context: Context) {
             // Set up utterance progress listener
             textToSpeech?.setOnUtteranceProgressListener(createUtteranceProgressListener(utteranceId))
 
-            // Start speaking
-            return when (val result = textToSpeech?.speak(text, queueMode, null, utteranceId)) {
+            val result = textToSpeech?.speak(text, queueMode, null, utteranceId)
+            Log.d(TAG, "textToSpeech.speak() called with result code: $result")
+
+            return when (result) {
                 TextToSpeech.SUCCESS -> {
                     // Wait for completion
                     speechResultChannel!!.receive()

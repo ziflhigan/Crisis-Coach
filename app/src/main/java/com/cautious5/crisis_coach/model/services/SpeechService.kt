@@ -7,10 +7,12 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 
 /**
  * Service for offline speech recognition using Android's SpeechRecognizer
@@ -31,6 +33,10 @@ class SpeechService(private val context: Context) {
     private val _currentLanguage = MutableStateFlow(DEFAULT_LANGUAGE)
     val currentLanguage: StateFlow<String> = _currentLanguage.asStateFlow()
 
+    // Flow for real-time partial results
+    private val _partialResultsFlow = MutableStateFlow("")
+    val partialResultsFlow: StateFlow<String> = _partialResultsFlow.asStateFlow()
+
     // Speech recognition components
     private var speechRecognizer: SpeechRecognizer? = null
     private var recognitionListener: RecognitionListener? = null
@@ -42,9 +48,9 @@ class SpeechService(private val context: Context) {
     private var maxResults = 5
 
     /**
-     * Initializes the speech recognition service
+     * Initializes the speech recognition service. Must be called from a coroutine.
      */
-    fun initialize(): InitializationResult {
+    suspend fun initialize(): InitializationResult = withContext(Dispatchers.Main) {
         Log.d(TAG, "Initializing SpeechService")
 
         try {
@@ -52,25 +58,21 @@ class SpeechService(private val context: Context) {
             if (!SpeechRecognizer.isRecognitionAvailable(context)) {
                 val error = "Speech recognition not available on this device"
                 Log.e(TAG, error)
-                return InitializationResult.Error(error)
+                return@withContext InitializationResult.Error(error)
             }
-
-            // Create speech recognizer
+            // Create speech recognizer on the main thread
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
-
             if (speechRecognizer == null) {
                 val error = "Failed to create SpeechRecognizer instance"
                 Log.e(TAG, error)
-                return InitializationResult.Error(error)
+                return@withContext InitializationResult.Error(error)
             }
-
             Log.i(TAG, "SpeechService initialized successfully")
-            return InitializationResult.Success
-
+            InitializationResult.Success
         } catch (e: Exception) {
             val error = "Failed to initialize SpeechService: ${e.message}"
             Log.e(TAG, error, e)
-            return InitializationResult.Error(error, e)
+            InitializationResult.Error(error, e)
         }
     }
 
@@ -89,12 +91,9 @@ class SpeechService(private val context: Context) {
         Log.d(TAG, "Starting speech recognition (language: $languageCode)")
         _recognitionState.value = RecognitionState.LISTENING
         _currentLanguage.value = languageCode
-
+        _partialResultsFlow.value = "" // Reset partial results
         try {
-            // Create result channel
-            resultChannel = Channel<SpeechResult>(capacity = 1)
-
-            // Create recognition intent
+            resultChannel = Channel(capacity = 1)
             val intent = createRecognitionIntent(languageCode, prompt)
 
             // Set up recognition listener
@@ -271,10 +270,7 @@ class SpeechService(private val context: Context) {
                 _recognitionState.value = RecognitionState.SPEAKING
             }
 
-            override fun onRmsChanged(rmsdB: Float) {
-                // Update volume level for UI feedback if needed
-                // Not logging to avoid spam
-            }
+            override fun onRmsChanged(rmsdB: Float) { /* Not logging to avoid spam */ }
 
             override fun onBufferReceived(buffer: ByteArray?) {
                 Log.d(TAG, "Audio buffer received: ${buffer?.size} bytes")
@@ -290,6 +286,7 @@ class SpeechService(private val context: Context) {
                 Log.e(TAG, "Speech recognition error: $errorMessage (code: $error)")
 
                 _recognitionState.value = RecognitionState.ERROR
+                _partialResultsFlow.value = "" // Clear partial results on error
                 resultChannel?.trySend(SpeechResult.Error(errorMessage))
             }
 
@@ -307,7 +304,7 @@ class SpeechService(private val context: Context) {
                         )
                     }
 
-                    Log.d(TAG, "Recognition successful: ${matches[0]} (confidence: ${confidence?.getOrNull(0)})")
+                    Log.d(TAG, "Recognition successful: ${matches[0]}")
                     _recognitionState.value = RecognitionState.IDLE
                     resultChannel?.trySend(SpeechResult.Success(recognitionResults))
                 } else {
@@ -315,6 +312,7 @@ class SpeechService(private val context: Context) {
                     _recognitionState.value = RecognitionState.IDLE
                     resultChannel?.trySend(SpeechResult.Error("No speech recognized"))
                 }
+                _partialResultsFlow.value = "" // Clear partial results on final result
             }
 
             override fun onPartialResults(partialResults: Bundle?) {
@@ -322,8 +320,9 @@ class SpeechService(private val context: Context) {
 
                 val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 if (!matches.isNullOrEmpty()) {
-                    Log.d(TAG, "Partial result: ${matches[0]}")
-                    // Could emit partial results via a separate flow if needed
+                    val partialText = matches[0]
+                    Log.d(TAG, "Partial result: $partialText")
+                    _partialResultsFlow.value = partialText // Emit the partial result
                 }
             }
 
