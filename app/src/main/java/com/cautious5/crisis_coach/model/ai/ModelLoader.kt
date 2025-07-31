@@ -32,6 +32,7 @@ class ModelLoader(private val context: Context) {
     sealed class LoadResult {
         data class Success(val modelPath: String) : LoadResult()
         data class Error(val message: String, val cause: Throwable? = null) : LoadResult()
+        data object Missing : LoadResult()
     }
 
     /**
@@ -72,11 +73,9 @@ class ModelLoader(private val context: Context) {
                 return@withContext LoadResult.Success(assetModelPath)
             }
 
-            // Model not found anywhere
-            val errorMessage = "Model file not found: ${variant.fileName}. " +
-                    "Please ensure the model file is placed in the Downloads folder or included in assets."
-            Log.e(TAG, errorMessage)
-            return@withContext LoadResult.Error(errorMessage)
+            // Return Missing instead of Error
+            Log.w(TAG, "Model file not found: ${variant.fileName}")
+            return@withContext LoadResult.Missing
 
         } catch (e: Exception) {
             Log.e(TAG, "Error loading model: ${e.message}", e)

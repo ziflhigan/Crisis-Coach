@@ -29,7 +29,7 @@ import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 @SuppressLint("StaticFieldLeak")
 class GemmaModelManager private constructor(
     private val context: Context,
-    private val modelLoader: ModelLoader
+    val modelLoader: ModelLoader
 ) {
     companion object {
         private const val TAG = "GemmaModelManager"
@@ -82,6 +82,11 @@ class GemmaModelManager private constructor(
                         }
                         is ModelLoader.LoadResult.Error ->
                             return@withContext InitializationResult.Error(load.message, load.cause)
+                        is ModelLoader.LoadResult.Missing ->  // Add this case
+                            return@withContext InitializationResult.Error(
+                                "Model file not found: ${config.variant.fileName}. Please download the model first.",
+                                null
+                            )
                     }
                 }
                 Log.i(TAG, "Model initialized in $initTime ms")

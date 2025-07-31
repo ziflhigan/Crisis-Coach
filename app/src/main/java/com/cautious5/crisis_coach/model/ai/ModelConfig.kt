@@ -58,28 +58,29 @@ enum class ModelVariant(
     val displayName: String,
     val effectiveParams: String,
     val approximateRamUsageMB: Long,
-    val fileName: String
+    val fileName: String,
+    val huggingFaceRepo: String,
+    val downloadFileName: String
 ) {
     GEMMA_3N_E2B(
         displayName = "Gemma 3n E2B (Standard)",
         effectiveParams = "2B",
         approximateRamUsageMB = 2048,
-        fileName = "gemma-3n-e2b-it.task"
+        fileName = "gemma-3n-e2b-it-int4.task",
+        huggingFaceRepo = "google/gemma-3n-E2B-it-litert-preview",
+        downloadFileName = "gemma-3n-e2b-it-int4.task"
     ),
     GEMMA_3N_E4B(
         displayName = "Gemma 3n E4B (High Quality)",
         effectiveParams = "4B",
         approximateRamUsageMB = 3072,
-        fileName = "gemma-3n-e4b-it.task"
+        fileName = "gemma-3n-e4b-it-int4.task",
+        huggingFaceRepo = "google/gemma-3n-E4B-it-litert-preview",
+        downloadFileName = "gemma-3n-e4b-it-int4.task"
     );
 
-    /**
-     * Checks if this model variant is suitable for the given device RAM
-     */
-    fun isSuitableForDevice(availableRamMB: Long): Boolean {
-        // Leave some headroom for the OS and other apps
-        val requiredRam = approximateRamUsageMB + 1024 // 1GB headroom
-        return availableRamMB >= requiredRam
+    fun getDownloadUrl(): String {
+        return "https://huggingface.co/$huggingFaceRepo/resolve/main/$downloadFileName"
     }
 }
 
