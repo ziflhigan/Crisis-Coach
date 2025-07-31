@@ -1,10 +1,12 @@
 package com.cautious5.crisis_coach
 
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -13,14 +15,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.cautious5.crisis_coach.model.ai.ModelVariant
+import com.cautious5.crisis_coach.ui.AuthWebViewActivity
 import com.cautious5.crisis_coach.ui.navigation.AppNavigation
 import com.cautious5.crisis_coach.ui.theme.CrisisCoachTheme
 import com.cautious5.crisis_coach.utils.Constants.ErrorMessages
 import com.cautious5.crisis_coach.utils.Constants.LogTags
 import com.cautious5.crisis_coach.utils.DeviceCapabilityChecker
+import com.cautious5.crisis_coach.utils.ModelDownloader
 
 class MainActivity : ComponentActivity() {
 
@@ -32,6 +38,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
+
+        val authActivityLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == AuthWebViewActivity.RESULT_AUTH_SUCCESS) {
+                Log.d(TAG, "Auth flow completed successfully. Retrying download.")
+                mainViewModel.retryDownloadAfterAuth()
+            } else {
+                Log.d(TAG, "Auth flow was cancelled or failed.")
+            }
+        }
+
         super.onCreate(savedInstanceState)
         Log.d(TAG, "MainActivity onCreate started")
 
@@ -44,6 +62,22 @@ class MainActivity : ComponentActivity() {
         setContent {
             CrisisCoachTheme {
                 val uiState by mainViewModel.uiState.collectAsState()
+                val context = LocalContext.current
+
+                val modelToAuth by mainViewModel.triggerAuthFlow.collectAsState()
+                LaunchedEffect(modelToAuth) {
+                    modelToAuth?.let { variant ->
+                        val intent = AuthWebViewActivity.newIntent(
+                            context = context,
+                            modelUrl = "https://huggingface.co/login?next=" +
+                                    Uri.encode("/${variant.huggingFaceRepo}"),
+                            modelName = variant.displayName
+                        )
+                        authActivityLauncher.launch(intent)
+                        mainViewModel.onAuthFlowTriggered() // Reset the trigger
+                    }
+                }
+
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -53,14 +87,56 @@ class MainActivity : ComponentActivity() {
                         MainViewModel.InitializationState.ERROR -> ErrorScreen(
                             title = uiState.errorTitle ?: "Error",
                             message = uiState.errorMessage ?: ErrorMessages.UNKNOWN_ERROR,
-                            onRetry = { mainViewModel.initializeApp() }
+                            onRetry = { mainViewModel.initializeApp() },
+                            onDownload = if (uiState.needsModelDownload) {
+                                { modelVariant -> mainViewModel.startModelDownload(modelVariant) }
+                            } else null,
+                            onCancelDownload = { mainViewModel.cancelDownload() },
+                            downloadState = uiState.downloadState
                         )
                         MainViewModel.InitializationState.SUCCESS -> AppNavigation()
                     }
                 }
+
+                if (uiState.needsTokenInput) {
+                    PasteTokenDialog(
+                        onDismiss = { /* Handle dismiss if needed */ },
+                        onConfirm = { token ->
+                            mainViewModel.saveTokenAndRetryDownload(token)
+                        }
+                    )
+                }
             }
         }
     }
+}
+
+@Composable
+private fun PasteTokenDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var token by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Enter Access Token") },
+        text = {
+            Column {
+                Text("Please paste your Hugging Face User Access Token with 'read' permissions. This is a one-time setup.")
+                OutlinedTextField(
+                    value = token,
+                    onValueChange = { token = it },
+                    label = { Text("hf_...") },
+                    modifier = Modifier.padding(top = 16.dp)
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(token) }, enabled = token.isNotBlank()) {
+                Text("Confirm")
+            }
+        }
+    )
 }
 
 @Composable
@@ -127,7 +203,10 @@ private fun LoadingScreen(deviceCapability: DeviceCapabilityChecker.DeviceCapabi
 private fun ErrorScreen(
     title: String,
     message: String,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    onDownload: ((modelVariant: ModelVariant) -> Unit)? = null,
+    onCancelDownload: (() -> Unit)? = null,
+    downloadState: ModelDownloader.DownloadState? = null
 ) {
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -144,25 +223,123 @@ private fun ErrorScreen(
                 modifier = Modifier.size(64.dp),
                 tint = MaterialTheme.colorScheme.error
             )
+
             Text(
                 text = title,
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.error,
                 textAlign = TextAlign.Center
             )
+
             Text(
                 text = message,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onBackground,
                 textAlign = TextAlign.Center
             )
-            Button(
-                onClick = onRetry,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
+
+            // Download progress UI
+            when (downloadState) {
+                is ModelDownloader.DownloadState.Preparing -> {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    CircularProgressIndicator()
+                    Text("Preparing download...", modifier = Modifier.padding(top = 8.dp))
+                }
+                is ModelDownloader.DownloadState.InProgress -> {
+                    val downloadedMb = downloadState.bytesDownloaded / (1024 * 1024)
+                    val totalMb = downloadState.totalSize / (1024 * 1024)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    LinearProgressIndicator(
+                        progress = { downloadState.progress / 100f },
+                        modifier = Modifier.fillMaxWidth(0.8f)
+                    )
+                    Text(
+                        text = "${downloadState.progress}% - ${downloadedMb}MB / ${totalMb}MB",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+                is ModelDownloader.DownloadState.Failed -> {
+                    Text(
+                        text = "Download failed: ${downloadState.error}",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+                is ModelDownloader.DownloadState.AuthRequired -> {
+                    Text(
+                        text = "Please sign in to Hugging Face and accept the Gemma license to download the model.",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+                else -> {} // Idle, Completed, or null state
+            }
+
+            // Action buttons
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("Retry Initialization")
+                when (downloadState) {
+                    is ModelDownloader.DownloadState.InProgress -> {
+                        Button(
+                            onClick = { onCancelDownload?.invoke() },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("Cancel Download")
+                        }
+                    }
+                    else -> {
+                        if (onDownload != null) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.padding(vertical = 16.dp)
+                            ) {
+                                Text(
+                                    "Please select a model to download:",
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                                // Button for the Standard E2B model
+                                Button(onClick = { onDownload(ModelVariant.GEMMA_3N_E2B) }) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("Download Standard Model")
+                                        Text(
+                                            "~2GB | Recommended for most devices",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                                // Button for the High-Quality E4B model
+                                Button(onClick = { onDownload(ModelVariant.GEMMA_3N_E4B) }) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("Download High-Quality Model")
+                                        Text(
+                                            "~3GB | For high-end devices (6GB+ RAM)",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        // Action buttons
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Retry button is always available
+                            Button(
+                                onClick = onRetry,
+                                enabled = downloadState !is ModelDownloader.DownloadState.InProgress
+                            ) {
+                                Text("Retry")
+                            }
+                        }
+                    }
+                }
             }
         }
     }
