@@ -63,15 +63,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewParameter
+import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cautious5.crisis_coach.ui.components.ResultCard
+import com.cautious5.crisis_coach.ui.theme.CrisisCoachTheme
+import com.cautious5.crisis_coach.ui.theme.EmergencyColors
 import com.cautious5.crisis_coach.ui.theme.EmergencyTextStyles
 import com.cautious5.crisis_coach.ui.theme.emergencyHigh
 import com.cautious5.crisis_coach.ui.theme.emergencyMedium
@@ -81,7 +87,6 @@ import com.cautious5.crisis_coach.ui.theme.structuralSurface
 import com.cautious5.crisis_coach.ui.theme.warningButton
 import com.cautious5.crisis_coach.ui.theme.warningCardBackground
 import com.cautious5.crisis_coach.utils.LocalPermissionManager
-import com.cautious5.crisis_coach.utils.PermissionManager
 import com.cautious5.crisis_coach.utils.ResponseParser
 import java.io.File
 import java.text.SimpleDateFormat
@@ -99,7 +104,6 @@ fun ImageTriageScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val scrollState = rememberScrollState()
 
     // Permission handling
     val permissionManager = LocalPermissionManager.current
@@ -119,7 +123,6 @@ fun ImageTriageScreen(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         if (success && cameraImageUri != null) {
-            // Handle camera result - load the captured image
             viewModel.loadImageFromUri(cameraImageUri!!)
         }
         viewModel.hideCameraCapture()
@@ -141,12 +144,61 @@ fun ImageTriageScreen(
         )
     }
 
+    ImageTriageScreenContent(
+        uiState = uiState,
+        onAnalysisTypeSelected = viewModel::setAnalysisType,
+        onSelectImage = {
+            if (permissionManager.hasCameraPermissions() && permissionManager.hasStoragePermissions()) {
+                viewModel.showImagePicker()
+            } else {
+                permissionManager.requestAllPermissions()
+            }
+        },
+        onClearImage = viewModel::clearImage,
+        onQuestionChanged = viewModel::updateCustomQuestion,
+        onAnalyzeImage = viewModel::analyzeImage,
+        onCancelAnalysis = viewModel::cancelAnalysis,
+        onClearError = viewModel::clearError,
+        onCameraSelected = {
+            cameraImageUri = createCameraImageUri()
+            cameraLauncher.launch(cameraImageUri!!)
+            viewModel.hideImagePicker()
+        },
+        onGallerySelected = {
+            galleryLauncher.launch("image/*")
+        },
+        onDismissImagePicker = viewModel::hideImagePicker,
+        onGetUrgencyColor = viewModel::getUrgencyColor,
+        onGetSafetyColor = viewModel::getSafetyColor,
+        onGetLevelDisplayText = viewModel::getLevelDisplayText
+    )
+}
+
+@Composable
+private fun ImageTriageScreenContent(
+    uiState: ImageTriageViewModel.ImageTriageUiState,
+    onAnalysisTypeSelected: (ImageTriageViewModel.AnalysisTypeOption) -> Unit,
+    onSelectImage: () -> Unit,
+    onClearImage: () -> Unit,
+    onQuestionChanged: (String) -> Unit,
+    onAnalyzeImage: () -> Unit,
+    onCancelAnalysis: () -> Unit,
+    onClearError: () -> Unit,
+    onCameraSelected: () -> Unit,
+    onGallerySelected: () -> Unit,
+    onDismissImagePicker: () -> Unit,
+    onGetUrgencyColor: (ResponseParser.UrgencyLevel) -> Color,
+    onGetSafetyColor: (ResponseParser.SafetyStatus) -> Color,
+    onGetLevelDisplayText: (Any) -> String
+) {
+    val scrollState = rememberScrollState()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(scrollState)
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Header
         ImageTriageHeader()
@@ -154,7 +206,7 @@ fun ImageTriageScreen(
         // Analysis Type Selector
         AnalysisTypeSelector(
             selectedType = uiState.analysisType,
-            onTypeSelected = viewModel::setAnalysisType
+            onTypeSelected = onAnalysisTypeSelected
         )
 
         // Image Input Section
@@ -162,32 +214,25 @@ fun ImageTriageScreen(
             selectedImage = uiState.selectedImage,
             hasImage = uiState.hasImage,
             isAnalyzing = uiState.isAnalyzing,
-            onSelectImage = {
-                if (permissionManager.hasCameraPermissions() && permissionManager.hasStoragePermissions()) {
-                    viewModel.showImagePicker()
-                } else {
-                    // Request permissions
-                    permissionManager.requestAllPermissions()
-                }
-            },
-            onClearImage = viewModel::clearImage
+            onSelectImage = onSelectImage,
+            onClearImage = onClearImage
         )
 
-        // Custom Question Input
+        // Custom Question Input - Only show if image is selected
         if (uiState.hasImage) {
             CustomQuestionSection(
                 question = uiState.customQuestion,
-                onQuestionChanged = viewModel::updateCustomQuestion,
+                onQuestionChanged = onQuestionChanged,
                 analysisType = uiState.analysisType
             )
-        }
 
-        // Analysis Button
-        if (uiState.hasImage && !uiState.isAnalyzing) {
-            AnalyzeButton(
-                onClick = viewModel::analyzeImage,
-                analysisType = uiState.analysisType
-            )
+            // Analysis Button
+            if (!uiState.isAnalyzing) {
+                AnalyzeButton(
+                    onClick = onAnalyzeImage,
+                    analysisType = uiState.analysisType
+                )
+            }
         }
 
         // Analysis Progress
@@ -195,7 +240,7 @@ fun ImageTriageScreen(
             AnalysisProgressCard(
                 analysisType = uiState.analysisType,
                 progress = uiState.analysisProgress,
-                onCancel = viewModel::cancelAnalysis
+                onCancel = onCancelAnalysis
             )
         }
 
@@ -204,9 +249,9 @@ fun ImageTriageScreen(
             AnalysisResultSection(
                 result = result,
                 analysisType = uiState.analysisType,
-                onGetUrgencyColor = viewModel::getUrgencyColor,
-                onGetSafetyColor = viewModel::getSafetyColor,
-                onGetLevelDisplayText = viewModel::getLevelDisplayText
+                onGetUrgencyColor = onGetUrgencyColor,
+                onGetSafetyColor = onGetSafetyColor,
+                onGetLevelDisplayText = onGetLevelDisplayText
             )
         }
 
@@ -214,7 +259,7 @@ fun ImageTriageScreen(
         uiState.error?.let { error ->
             ErrorCard(
                 error = error,
-                onDismiss = viewModel::clearError
+                onDismiss = onClearError
             )
         }
 
@@ -225,15 +270,9 @@ fun ImageTriageScreen(
     // Image Picker Dialog
     if (uiState.showImagePicker) {
         ImagePickerDialog(
-            onCameraSelected = {
-                cameraImageUri = createCameraImageUri()
-                cameraLauncher.launch(cameraImageUri!!)
-                viewModel.hideImagePicker()
-            },
-            onGallerySelected = {
-                galleryLauncher.launch("image/*")
-            },
-            onDismiss = viewModel::hideImagePicker
+            onCameraSelected = onCameraSelected,
+            onGallerySelected = onGallerySelected,
+            onDismiss = onDismissImagePicker
         )
     }
 }
@@ -244,11 +283,13 @@ private fun ImageTriageHeader() {
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.medicalSurface
-        )
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
             modifier = Modifier.padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.CameraAlt,
@@ -256,8 +297,6 @@ private fun ImageTriageHeader() {
                 modifier = Modifier.size(32.dp),
                 tint = MaterialTheme.colorScheme.primary
             )
-
-            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 text = "Image Analysis",
@@ -282,7 +321,8 @@ private fun AnalysisTypeSelector(
     onTypeSelected: (ImageTriageViewModel.AnalysisTypeOption) -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -344,7 +384,8 @@ private fun AnalysisTypeChip(
                 Text(
                     text = option.displayName,
                     style = MaterialTheme.typography.labelMedium,
-                    textAlign = TextAlign.Center
+                    textAlign = TextAlign.Center,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                 )
             }
         },
@@ -366,11 +407,12 @@ private fun ImageInputSection(
     onClearImage: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
                 text = "Image",
@@ -380,97 +422,125 @@ private fun ImageInputSection(
             )
 
             if (hasImage && selectedImage != null) {
-                // Image Display
-                Box(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Image(
-                        bitmap = selectedImage.asImageBitmap(),
-                        contentDescription = "Selected image",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp)
-                            .clip(RoundedCornerShape(8.dp)),
-                        contentScale = ContentScale.Crop
-                    )
-
-                    // Analysis overlay
-                    if (isAnalyzing) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Color.Black.copy(alpha = 0.5f),
-                                    RoundedCornerShape(8.dp)
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(
-                                color = MaterialTheme.colorScheme.primary,
-                                strokeWidth = 4.dp
-                            )
-                        }
-                    }
-
-                    // Clear button
-                    if (!isAnalyzing) {
-                        IconButton(
-                            onClick = onClearImage,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(8.dp)
-                                .background(
-                                    Color.Black.copy(alpha = 0.5f),
-                                    CircleShape
-                                )
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Remove image",
-                                tint = Color.White
-                            )
-                        }
-                    }
-                }
+                ImageDisplay(
+                    image = selectedImage,
+                    isAnalyzing = isAnalyzing,
+                    onClearImage = onClearImage
+                )
             } else {
-                // Image Selection Area
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                        .border(
-                            2.dp,
-                            MaterialTheme.colorScheme.outline,
-                            RoundedCornerShape(8.dp)
-                        )
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { onSelectImage() },
-                    contentAlignment = Alignment.Center
+                ImageSelectionArea(onSelectImage = onSelectImage)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImageDisplay(
+    image: android.graphics.Bitmap,
+    isAnalyzing: Boolean,
+    onClearImage: () -> Unit
+) {
+    Box(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Image(
+            bitmap = image.asImageBitmap(),
+            contentDescription = "Selected image",
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .clip(RoundedCornerShape(8.dp)),
+            contentScale = ContentScale.Crop
+        )
+
+        // Analysis overlay
+        if (isAnalyzing) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Color.Black.copy(alpha = 0.5f),
+                        RoundedCornerShape(8.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CameraAlt,
-                            contentDescription = "Select image",
-                            modifier = Modifier.size(48.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Tap to Capture or Select Image",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                        Text(
-                            text = "Camera • Gallery",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
-                    }
+                    CircularProgressIndicator(
+                        color = MaterialTheme.colorScheme.primary,
+                        strokeWidth = 4.dp
+                    )
+                    Text(
+                        text = "Analyzing...",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
+        }
+
+        // Clear button
+        if (!isAnalyzing) {
+            IconButton(
+                onClick = onClearImage,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .background(
+                        Color.Black.copy(alpha = 0.5f),
+                        CircleShape
+                    )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Remove image",
+                    tint = Color.White
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImageSelectionArea(onSelectImage: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(200.dp)
+            .border(
+                2.dp,
+                MaterialTheme.colorScheme.outline,
+                RoundedCornerShape(8.dp)
+            )
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onSelectImage() },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.CameraAlt,
+                contentDescription = "Select image",
+                modifier = Modifier.size(48.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Tap to Capture or Select Image",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = "Camera • Gallery",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
         }
     }
 }
@@ -482,7 +552,8 @@ private fun CustomQuestionSection(
     analysisType: ImageTriageViewModel.AnalysisTypeOption
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -557,7 +628,8 @@ private fun AnalyzeButton(
         Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = text,
-            style = EmergencyTextStyles.ButtonText
+            style = EmergencyTextStyles.ButtonText,
+            fontWeight = FontWeight.SemiBold
         )
     }
 }
@@ -572,7 +644,8 @@ private fun AnalysisProgressCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
             modifier = Modifier.padding(20.dp),
@@ -654,39 +727,11 @@ private fun MedicalResultCard(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Urgency Level Badge
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = onGetUrgencyColor(result.urgencyLevel).copy(alpha = 0.2f),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    onGetUrgencyColor(result.urgencyLevel)
-                )
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = when (result.urgencyLevel) {
-                            ResponseParser.UrgencyLevel.CRITICAL -> Icons.Default.Warning
-                            ResponseParser.UrgencyLevel.HIGH -> Icons.Default.PriorityHigh
-                            ResponseParser.UrgencyLevel.MEDIUM -> Icons.Default.Info
-                            ResponseParser.UrgencyLevel.LOW -> Icons.Default.CheckCircle
-                            ResponseParser.UrgencyLevel.UNKNOWN -> Icons.AutoMirrored.Filled.Help
-                        },
-                        contentDescription = "Urgency level",
-                        modifier = Modifier.size(16.dp),
-                        tint = onGetUrgencyColor(result.urgencyLevel)
-                    )
-                    Text(
-                        text = "${onGetLevelDisplayText(result.urgencyLevel)} Urgency",
-                        style = EmergencyTextStyles.UrgencyLevel,
-                        color = onGetUrgencyColor(result.urgencyLevel),
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
+            UrgencyLevelBadge(
+                urgencyLevel = result.urgencyLevel,
+                onGetUrgencyColor = onGetUrgencyColor,
+                onGetLevelDisplayText = onGetLevelDisplayText
+            )
 
             // Assessment
             Text(
@@ -697,82 +742,23 @@ private fun MedicalResultCard(
 
             // Recommendations
             if (result.recommendations.isNotEmpty()) {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "Recommended Actions:",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    result.recommendations.forEach { recommendation ->
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowRight,
-                                contentDescription = "Recommendation",
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = recommendation,
-                                style = EmergencyTextStyles.RecommendationText,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                }
+                RecommendationsList(
+                    title = "Recommended Actions:",
+                    items = result.recommendations,
+                    icon = Icons.AutoMirrored.Filled.ArrowRight
+                )
             }
 
             // Professional Care Warning
             if (result.requiresProfessionalCare) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.warningCardBackground
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = "Warning",
-                            tint = MaterialTheme.colorScheme.warningButton,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = "Professional medical care required",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
+                ProfessionalCareWarning()
             }
 
-            // Confidence and Time
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Confidence: ${(result.confidenceLevel * 100).toInt()}%",
-                    style = EmergencyTextStyles.ConfidenceText,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "Analysis: ${result.analysisTimeMs}ms",
-                    style = EmergencyTextStyles.TimeText,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            // Metadata
+            ResultMetadata(
+                confidenceLevel = result.confidenceLevel,
+                analysisTimeMs = result.analysisTimeMs
+            )
         }
     }
 }
@@ -792,39 +778,11 @@ private fun StructuralResultCard(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Safety Status Badge
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = onGetSafetyColor(result.safetyStatus).copy(alpha = 0.2f),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    onGetSafetyColor(result.safetyStatus)
-                )
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = when (result.safetyStatus) {
-                            ResponseParser.SafetyStatus.CRITICAL -> Icons.Default.Dangerous
-                            ResponseParser.SafetyStatus.UNSAFE -> Icons.Default.Warning
-                            ResponseParser.SafetyStatus.CAUTION -> Icons.Default.Info
-                            ResponseParser.SafetyStatus.SAFE -> Icons.Default.CheckCircle
-                            ResponseParser.SafetyStatus.UNKNOWN -> Icons.AutoMirrored.Filled.Help
-                        },
-                        contentDescription = "Safety status",
-                        modifier = Modifier.size(16.dp),
-                        tint = onGetSafetyColor(result.safetyStatus)
-                    )
-                    Text(
-                        text = onGetLevelDisplayText(result.safetyStatus),
-                        style = EmergencyTextStyles.UrgencyLevel,
-                        color = onGetSafetyColor(result.safetyStatus),
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
+            SafetyStatusBadge(
+                safetyStatus = result.safetyStatus,
+                onGetSafetyColor = onGetSafetyColor,
+                onGetLevelDisplayText = onGetLevelDisplayText
+            )
 
             // Assessment
             Text(
@@ -835,88 +793,28 @@ private fun StructuralResultCard(
 
             // Issues
             if (result.identifiedIssues.isNotEmpty()) {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "Identified Issues:",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    result.identifiedIssues.forEach { issue ->
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Error,
-                                contentDescription = "Issue",
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                            Text(
-                                text = issue,
-                                style = EmergencyTextStyles.RecommendationText,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                }
+                RecommendationsList(
+                    title = "Identified Issues:",
+                    items = result.identifiedIssues,
+                    icon = Icons.Default.Error,
+                    iconTint = MaterialTheme.colorScheme.error
+                )
             }
 
             // Immediate Actions
             if (result.immediateActions.isNotEmpty()) {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "Immediate Actions:",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    result.immediateActions.forEach { action ->
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowRight,
-                                contentDescription = "Action",
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = action,
-                                style = EmergencyTextStyles.RecommendationText,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Confidence and Time
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Confidence: ${(result.confidenceLevel * 100).toInt()}%",
-                    style = EmergencyTextStyles.ConfidenceText,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "Analysis: ${result.analysisTimeMs}ms",
-                    style = EmergencyTextStyles.TimeText,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                RecommendationsList(
+                    title = "Immediate Actions:",
+                    items = result.immediateActions,
+                    icon = Icons.AutoMirrored.Filled.ArrowRight
                 )
             }
+
+            // Metadata
+            ResultMetadata(
+                confidenceLevel = result.confidenceLevel,
+                analysisTimeMs = result.analysisTimeMs
+            )
         }
     }
 }
@@ -933,93 +831,203 @@ private fun GeneralResultCard(
         Column(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Display the main description
+            // Description
             Text(
                 text = result.description,
                 style = EmergencyTextStyles.AnalysisResult,
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            // Display Key Observations
+            // Key Observations
             if (result.keyObservations.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Key Observations:",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    result.keyObservations.forEach { observation ->
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = "Observation",
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.tertiary
-                            )
-                            Text(
-                                text = observation,
-                                style = EmergencyTextStyles.RecommendationText,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                }
+                RecommendationsList(
+                    title = "Key Observations:",
+                    items = result.keyObservations,
+                    icon = Icons.Default.Info,
+                    iconTint = MaterialTheme.colorScheme.tertiary
+                )
             }
 
-            // Display Suggested Actions
+            // Suggested Actions
             if (result.suggestedActions.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Suggested Actions:",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    result.suggestedActions.forEach { action ->
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowRight,
-                                contentDescription = "Action",
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = action,
-                                style = EmergencyTextStyles.RecommendationText,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                }
+                RecommendationsList(
+                    title = "Suggested Actions:",
+                    items = result.suggestedActions,
+                    icon = Icons.AutoMirrored.Filled.ArrowRight
+                )
             }
 
+            // Metadata
+            ResultMetadata(
+                confidenceLevel = result.confidence,
+                analysisTimeMs = result.analysisTimeMs
+            )
+        }
+    }
+}
 
-            // Display confidence and time
+@Composable
+private fun UrgencyLevelBadge(
+    urgencyLevel: ResponseParser.UrgencyLevel,
+    onGetUrgencyColor: (ResponseParser.UrgencyLevel) -> Color,
+    onGetLevelDisplayText: (Any) -> String
+) {
+    val color = onGetUrgencyColor(urgencyLevel)
+    val icon = when (urgencyLevel) {
+        ResponseParser.UrgencyLevel.CRITICAL -> Icons.Default.Warning
+        ResponseParser.UrgencyLevel.HIGH -> Icons.Default.PriorityHigh
+        ResponseParser.UrgencyLevel.MEDIUM -> Icons.Default.Info
+        ResponseParser.UrgencyLevel.LOW -> Icons.Default.CheckCircle
+        ResponseParser.UrgencyLevel.UNKNOWN -> Icons.AutoMirrored.Filled.Help
+    }
+
+    StatusBadge(
+        label = "${onGetLevelDisplayText(urgencyLevel)} Urgency",
+        icon = icon,
+        color = color
+    )
+}
+
+@Composable
+private fun SafetyStatusBadge(
+    safetyStatus: ResponseParser.SafetyStatus,
+    onGetSafetyColor: (ResponseParser.SafetyStatus) -> Color,
+    onGetLevelDisplayText: (Any) -> String
+) {
+    val color = onGetSafetyColor(safetyStatus)
+    val icon = when (safetyStatus) {
+        ResponseParser.SafetyStatus.CRITICAL -> Icons.Default.Dangerous
+        ResponseParser.SafetyStatus.UNSAFE -> Icons.Default.Warning
+        ResponseParser.SafetyStatus.CAUTION -> Icons.Default.Info
+        ResponseParser.SafetyStatus.SAFE -> Icons.Default.CheckCircle
+        ResponseParser.SafetyStatus.UNKNOWN -> Icons.AutoMirrored.Filled.Help
+    }
+
+    StatusBadge(
+        label = onGetLevelDisplayText(safetyStatus),
+        icon = icon,
+        color = color
+    )
+}
+
+@Composable
+private fun StatusBadge(
+    label: String,
+    icon: ImageVector,
+    color: Color
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = color.copy(alpha = 0.2f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, color)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = color
+            )
+            Text(
+                text = label,
+                style = EmergencyTextStyles.UrgencyLevel,
+                color = color,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecommendationsList(
+    title: String,
+    items: List<String>,
+    icon: ImageVector,
+    iconTint: Color = MaterialTheme.colorScheme.primary
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        items.forEach { item ->
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top
             ) {
-                Text(
-                    text = "Confidence: ${(result.confidence * 100).toInt()}%",
-                    style = EmergencyTextStyles.ConfidenceText,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = iconTint
                 )
                 Text(
-                    text = "Analysis: ${result.analysisTimeMs}ms",
-                    style = EmergencyTextStyles.TimeText,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = item,
+                    style = EmergencyTextStyles.RecommendationText,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ProfessionalCareWarning() {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.warningCardBackground
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = "Warning",
+                tint = MaterialTheme.colorScheme.warningButton,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = "Professional medical care required",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
+private fun ResultMetadata(
+    confidenceLevel: Float,
+    analysisTimeMs: Long
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = "Confidence: ${(confidenceLevel * 100).toInt()}%",
+            style = EmergencyTextStyles.ConfidenceText,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = "Analysis: ${analysisTimeMs}ms",
+            style = EmergencyTextStyles.TimeText,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -1086,7 +1094,9 @@ private fun DisclaimerCard() {
                 modifier = Modifier.size(20.dp)
             )
             Text(
-                text = "Important: This AI assessment is not a substitute for professional medical or structural evaluation. Always seek qualified professional assistance when available.",
+                text = "Important: This AI assessment is not a substitute for professional medical " +
+                        "or structural evaluation. " +
+                        "Always seek qualified professional assistance when available.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f)
@@ -1114,64 +1124,20 @@ private fun ImagePickerDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // Camera Option
-                Card(
-                    onClick = onCameraSelected,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CameraAlt,
-                            contentDescription = "Camera",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Column {
-                            Text(
-                                text = "Camera",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "Take a new photo",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
+                ImageSourceOption(
+                    icon = Icons.Default.CameraAlt,
+                    title = "Camera",
+                    subtitle = "Take a new photo",
+                    onClick = onCameraSelected
+                )
 
                 // Gallery Option
-                Card(
-                    onClick = onGallerySelected,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PhotoLibrary,
-                            contentDescription = "Gallery",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Column {
-                            Text(
-                                text = "Gallery",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "Choose from existing photos",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
+                ImageSourceOption(
+                    icon = Icons.Default.PhotoLibrary,
+                    title = "Gallery",
+                    subtitle = "Choose from existing photos",
+                    onClick = onGallerySelected
+                )
             }
         },
         confirmButton = {},
@@ -1181,4 +1147,130 @@ private fun ImagePickerDialog(
             }
         }
     )
+}
+
+@Composable
+private fun ImageSourceOption(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+// Preview Parameter Provider
+class ImageTriageUiStateProvider : PreviewParameterProvider<ImageTriageViewModel.ImageTriageUiState> {
+    override val values = sequenceOf(
+        // Initial state
+        ImageTriageViewModel.ImageTriageUiState(),
+        // With image selected
+        ImageTriageViewModel.ImageTriageUiState(
+            hasImage = true,
+            customQuestion = "Is this wound infected?"
+        ),
+        // Analyzing state
+        ImageTriageViewModel.ImageTriageUiState(
+            hasImage = true,
+            isAnalyzing = true,
+            analysisProgress = 0.6f
+        ),
+        // Error state
+        ImageTriageViewModel.ImageTriageUiState(
+            hasImage = true,
+            error = "Analysis failed. Please try again with a clearer image."
+        )
+    )
+}
+
+// Preview Functions
+@Preview(
+    name = "Image Triage Screen",
+    apiLevel = 34,
+    showBackground = true
+)
+@Composable
+private fun ImageTriageScreenPreview(
+    @PreviewParameter(ImageTriageUiStateProvider::class) uiState: ImageTriageViewModel.ImageTriageUiState
+) {
+    CrisisCoachTheme {
+        Surface {
+            ImageTriageScreenContent(
+                uiState = uiState,
+                onAnalysisTypeSelected = {},
+                onSelectImage = {},
+                onClearImage = {},
+                onQuestionChanged = {},
+                onAnalyzeImage = {},
+                onCancelAnalysis = {},
+                onClearError = {},
+                onCameraSelected = {},
+                onGallerySelected = {},
+                onDismissImagePicker = {},
+                onGetUrgencyColor = { Color.Red },
+                onGetSafetyColor = { EmergencyColors.High },
+                onGetLevelDisplayText = { "High" }
+            )
+        }
+    }
+}
+
+@Preview(
+    name = "Image Triage Screen - Dark",
+    apiLevel = 34,
+    showBackground = true
+)
+@Composable
+private fun ImageTriageScreenDarkPreview() {
+    CrisisCoachTheme(darkTheme = true) {
+        Surface {
+            ImageTriageScreenContent(
+                uiState = ImageTriageViewModel.ImageTriageUiState(
+                    analysisType = ImageTriageViewModel.AnalysisTypeOption.MEDICAL,
+                    hasImage = true,
+                    customQuestion = "What treatment is needed for this injury?"
+                ),
+                onAnalysisTypeSelected = {},
+                onSelectImage = {},
+                onClearImage = {},
+                onQuestionChanged = {},
+                onAnalyzeImage = {},
+                onCancelAnalysis = {},
+                onClearError = {},
+                onCameraSelected = {},
+                onGallerySelected = {},
+                onDismissImagePicker = {},
+                onGetUrgencyColor = { Color.Red },
+                onGetSafetyColor = { EmergencyColors.High },
+                onGetLevelDisplayText = { "Critical" }
+            )
+        }
+    }
 }
