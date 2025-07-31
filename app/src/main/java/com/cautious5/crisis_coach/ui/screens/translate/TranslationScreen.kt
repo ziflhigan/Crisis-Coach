@@ -68,7 +68,7 @@ import com.cautious5.crisis_coach.ui.theme.playButton
 import com.cautious5.crisis_coach.ui.theme.sourceLanguage
 import com.cautious5.crisis_coach.ui.theme.targetLanguage
 import com.cautious5.crisis_coach.ui.theme.translationSurface
-import com.cautious5.crisis_coach.utils.PermissionManager
+import com.cautious5.crisis_coach.utils.LocalPermissionManager
 
 /**
  * Translation screen for Crisis Coach app
@@ -84,7 +84,7 @@ fun TranslateScreen(
     val scrollState = rememberScrollState()
 
     // Permission handling
-    val permissionManager = remember { PermissionManager(context as androidx.activity.ComponentActivity) }
+    val permissionManager = LocalPermissionManager.current
 
     Column(
         modifier = Modifier
@@ -111,8 +111,8 @@ fun TranslateScreen(
             inputText = uiState.inputText,
             onInputTextChanged = viewModel::updateInputText,
             isListening = uiState.isListening,
+            isTranslating = uiState.isTranslating,
             onStartVoiceInput = {
-                // Check microphone permission
                 if (permissionManager.hasMicrophonePermissions()) {
                     viewModel.startVoiceTranslation()
                 } else {
@@ -120,7 +120,8 @@ fun TranslateScreen(
                 }
             },
             onStopVoiceInput = viewModel::stopVoiceTranslation,
-            canUseMicrophone = viewModel.languageSupportsSpeech(uiState.sourceLanguage)
+            canUseMicrophone = viewModel.languageSupportsSpeech(uiState.sourceLanguage),
+            onTranslateClicked = viewModel::onTranslateClicked
         )
 
         // Translation Status
@@ -338,9 +339,11 @@ private fun InputSection(
     inputText: String,
     onInputTextChanged: (String) -> Unit,
     isListening: Boolean,
+    isTranslating: Boolean,
     onStartVoiceInput: () -> Unit,
     onStopVoiceInput: () -> Unit,
-    canUseMicrophone: Boolean
+    canUseMicrophone: Boolean,
+    onTranslateClicked: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth()
@@ -356,7 +359,6 @@ private fun InputSection(
                 fontWeight = FontWeight.SemiBold
             )
 
-            // Voice Input Button
             VoiceInputButton(
                 isListening = isListening,
                 onStartListening = onStartVoiceInput,
@@ -375,7 +377,6 @@ private fun InputSection(
                 )
             }
 
-            // Text Input
             OutlinedTextField(
                 value = inputText,
                 onValueChange = onInputTextChanged,
@@ -386,6 +387,27 @@ private fun InputSection(
                 maxLines = 5,
                 textStyle = EmergencyTextStyles.InputText
             )
+
+            // This button part will now compile correctly
+            Button(
+                onClick = onTranslateClicked,
+                enabled = inputText.isNotBlank() && !isTranslating,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+            ) {
+                if (isTranslating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Translating...")
+                } else {
+                    Text("Translate")
+                }
+            }
         }
     }
 }

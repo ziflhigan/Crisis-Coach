@@ -4,17 +4,24 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import com.cautious5.crisis_coach.CrisisCoachApplication
-import com.cautious5.crisis_coach.model.services.*
-import com.cautious5.crisis_coach.utils.Constants.LogTags
+import com.cautious5.crisis_coach.model.services.SpeechOutputResult
+import com.cautious5.crisis_coach.model.services.TextTranslationResult
+import com.cautious5.crisis_coach.model.services.TranslationInitResult
+import com.cautious5.crisis_coach.model.services.TranslationLanguage
+import com.cautious5.crisis_coach.model.services.TranslationService
+import com.cautious5.crisis_coach.model.services.TranslationState
+import com.cautious5.crisis_coach.model.services.VoiceTranslationResult
 import com.cautious5.crisis_coach.utils.Constants.DEFAULT_SOURCE_LANGUAGE
 import com.cautious5.crisis_coach.utils.Constants.DEFAULT_TARGET_LANGUAGE
-import com.cautious5.crisis_coach.utils.Constants.TRANSLATION_DEBOUNCE_DELAY_MS
+import com.cautious5.crisis_coach.utils.Constants.LogTags
 import com.cautious5.crisis_coach.utils.Constants.TRANSLATION_MAX_TEXT_LENGTH
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 /**
  * ViewModel for TranslateScreen
@@ -76,6 +83,7 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
                         Log.d(TAG, "Translation service initialized successfully")
                         loadSupportedLanguages()
                         observeTranslationServiceState()
+                        observeSpeechResults() // Observe speech partial results
                     }
                     is TranslationInitResult.Error -> {
                         Log.e(TAG, "Failed to initialize translation service: ${initResult.message}")
@@ -85,6 +93,17 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing TranslateViewModel", e)
                 setError("Initialization failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun observeSpeechResults() {
+        viewModelScope.launch {
+            // Listen for partial results from the speech service for real-time transcription
+            translationService.speechService.partialResultsFlow.collect { partialText ->
+                if (_uiState.value.isListening) {
+                    _uiState.update { it.copy(inputText = partialText) }
+                }
             }
         }
     }
@@ -189,27 +208,27 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
      * Update input text and trigger translation with debouncing
      */
     fun updateInputText(text: String) {
-        if (text.length > TRANSLATION_MAX_TEXT_LENGTH) {
-            Log.w(TAG, "Input text too long, truncating")
-            val truncatedText = text.take(TRANSLATION_MAX_TEXT_LENGTH)
-            _uiState.value = _uiState.value.copy(inputText = truncatedText)
-            return
+        translationJob?.cancel() // Cancel any ongoing translation from previous text
+        val currentText = if (text.length > TRANSLATION_MAX_TEXT_LENGTH) {
+            text.take(TRANSLATION_MAX_TEXT_LENGTH)
+        } else {
+            text
         }
+        _uiState.update { it.copy(inputText = currentText) }
 
-        _uiState.value = _uiState.value.copy(inputText = text)
-
-        // Cancel previous translation job
-        translationJob?.cancel()
-
-        if (text.isBlank()) {
+        if (currentText.isBlank()) {
             clearTranslation()
+        }
+    }
+
+    fun onTranslateClicked() {
+        val textToTranslate = _uiState.value.inputText
+        if (textToTranslate.isBlank()) {
             return
         }
-
-        // Debounce text translation
+        translationJob?.cancel()
         translationJob = viewModelScope.launch {
-            delay(TRANSLATION_DEBOUNCE_DELAY_MS)
-            translateText(text)
+            translateText(textToTranslate)
         }
     }
 
@@ -231,14 +250,14 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
             ).collect { result ->
                 when (result) {
                     is TextTranslationResult.Success -> {
-                        if (result.isComplete) {
-                            Log.d(TAG, "Text translation completed")
+                        if (result.isComplete) Log.d(TAG, "Text translation completed")
+                        _uiState.update {
+                            it.copy(
+                                outputText = result.translatedText,
+                                pronunciationGuide = result.pronunciationGuide,
+                                canPlayTranslation = result.translatedText.isNotBlank()
+                            )
                         }
-                        _uiState.value = _uiState.value.copy(
-                            outputText = result.translatedText,
-                            pronunciationGuide = result.pronunciationGuide,
-                            canPlayTranslation = result.translatedText.isNotBlank()
-                        )
                     }
                     is TextTranslationResult.Error -> {
                         Log.e(TAG, "Text translation failed: ${result.message}")
