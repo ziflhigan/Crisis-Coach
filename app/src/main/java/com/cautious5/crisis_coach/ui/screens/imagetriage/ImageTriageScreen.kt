@@ -80,6 +80,7 @@ import com.cautious5.crisis_coach.ui.theme.medicalSurface
 import com.cautious5.crisis_coach.ui.theme.structuralSurface
 import com.cautious5.crisis_coach.ui.theme.warningButton
 import com.cautious5.crisis_coach.ui.theme.warningCardBackground
+import com.cautious5.crisis_coach.utils.LocalPermissionManager
 import com.cautious5.crisis_coach.utils.PermissionManager
 import com.cautious5.crisis_coach.utils.ResponseParser
 import java.io.File
@@ -101,7 +102,7 @@ fun ImageTriageScreen(
     val scrollState = rememberScrollState()
 
     // Permission handling
-    val permissionManager = remember { PermissionManager(context as androidx.activity.ComponentActivity) }
+    val permissionManager = LocalPermissionManager.current
 
     // Camera URI state
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
