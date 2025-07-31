@@ -26,7 +26,9 @@ import com.cautious5.crisis_coach.ui.theme.CrisisCoachTheme
 import com.cautious5.crisis_coach.utils.Constants.ErrorMessages
 import com.cautious5.crisis_coach.utils.Constants.LogTags
 import com.cautious5.crisis_coach.utils.DeviceCapabilityChecker
+import com.cautious5.crisis_coach.utils.LocalPermissionManager
 import com.cautious5.crisis_coach.utils.ModelDownloader
+import com.cautious5.crisis_coach.utils.PermissionManager
 
 class MainActivity : ComponentActivity() {
 
@@ -35,6 +37,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private val mainViewModel: MainViewModel by viewModels()
+    private lateinit var permissionManager: PermissionManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
@@ -51,6 +54,9 @@ class MainActivity : ComponentActivity() {
         }
 
         super.onCreate(savedInstanceState)
+
+        permissionManager = PermissionManager(this)
+
         Log.d(TAG, "MainActivity onCreate started")
 
         splashScreen.setKeepOnScreenCondition {
@@ -61,50 +67,52 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             CrisisCoachTheme {
-                val uiState by mainViewModel.uiState.collectAsState()
-                val context = LocalContext.current
+                CompositionLocalProvider(LocalPermissionManager provides permissionManager) {
+                    val uiState by mainViewModel.uiState.collectAsState()
+                    val context = LocalContext.current
 
-                val modelToAuth by mainViewModel.triggerAuthFlow.collectAsState()
-                LaunchedEffect(modelToAuth) {
-                    modelToAuth?.let { variant ->
-                        val intent = AuthWebViewActivity.newIntent(
-                            context = context,
-                            modelUrl = "https://huggingface.co/login?next=" +
-                                    Uri.encode("/${variant.huggingFaceRepo}"),
-                            modelName = variant.displayName
-                        )
-                        authActivityLauncher.launch(intent)
-                        mainViewModel.onAuthFlowTriggered() // Reset the trigger
-                    }
-                }
-
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    when (uiState.initState) {
-                        MainViewModel.InitializationState.LOADING -> LoadingScreen(uiState.deviceCapability)
-                        MainViewModel.InitializationState.ERROR -> ErrorScreen(
-                            title = uiState.errorTitle ?: "Error",
-                            message = uiState.errorMessage ?: ErrorMessages.UNKNOWN_ERROR,
-                            onRetry = { mainViewModel.initializeApp() },
-                            onDownload = if (uiState.needsModelDownload) {
-                                { modelVariant -> mainViewModel.startModelDownload(modelVariant) }
-                            } else null,
-                            onCancelDownload = { mainViewModel.cancelDownload() },
-                            downloadState = uiState.downloadState
-                        )
-                        MainViewModel.InitializationState.SUCCESS -> AppNavigation()
-                    }
-                }
-
-                if (uiState.needsTokenInput) {
-                    PasteTokenDialog(
-                        onDismiss = { /* Handle dismiss if needed */ },
-                        onConfirm = { token ->
-                            mainViewModel.saveTokenAndRetryDownload(token)
+                    val modelToAuth by mainViewModel.triggerAuthFlow.collectAsState()
+                    LaunchedEffect(modelToAuth) {
+                        modelToAuth?.let { variant ->
+                            val intent = AuthWebViewActivity.newIntent(
+                                context = context,
+                                modelUrl = "https://huggingface.co/login?next=" +
+                                        Uri.encode("/${variant.huggingFaceRepo}"),
+                                modelName = variant.displayName
+                            )
+                            authActivityLauncher.launch(intent)
+                            mainViewModel.onAuthFlowTriggered() // Reset the trigger
                         }
-                    )
+                    }
+
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        AppNavigation()
+
+                        if (uiState.initState == MainViewModel.InitializationState.ERROR) {
+                            ErrorScreen(
+                                title = uiState.errorTitle ?: "Error",
+                                message = uiState.errorMessage ?: ErrorMessages.UNKNOWN_ERROR,
+                                onRetry = { mainViewModel.initializeApp() },
+                                onDownload = if (uiState.needsModelDownload) {
+                                    { modelVariant -> mainViewModel.startModelDownload(modelVariant) }
+                                } else null,
+                                onCancelDownload = { mainViewModel.cancelDownload() },
+                                downloadState = uiState.downloadState
+                            )
+                        }
+                    }
+
+                    if (uiState.needsTokenInput) {
+                        PasteTokenDialog(
+                            onDismiss = { /* Handle dismiss if needed */ },
+                            onConfirm = { token ->
+                                mainViewModel.saveTokenAndRetryDownload(token)
+                            }
+                        )
+                    }
                 }
             }
         }
