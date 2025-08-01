@@ -69,6 +69,8 @@ object PromptUtils {
             Format your response as:
             Translation: [translated text]
             Pronunciation: [pronunciation guide]
+            
+            Don't include any markdown syntax.
             """.trimIndent()
         } else {
             "$basePrompt\n\nProvide only the translation:"
