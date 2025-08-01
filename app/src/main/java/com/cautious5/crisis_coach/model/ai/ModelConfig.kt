@@ -148,3 +148,13 @@ data class ModelPerformanceMetrics(
         )
     }
 }
+
+/**
+ * Generation parameters for model inference
+ */
+data class GenerationParams(
+    val temperature: Float = 0.7f,
+    val topK: Int = 64,
+    val topP: Float = 0.95f,
+    val maxOutputTokens: Int = 512
+)

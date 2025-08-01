@@ -86,7 +86,7 @@ class ModelLoader(private val context: Context) {
     /**
      * Gets the path for model in internal storage
      */
-    private fun getInternalModelPath(variant: ModelVariant): String {
+    fun getInternalModelPath(variant: ModelVariant): String {
         val modelsDir = File(context.filesDir, MODELS_DIRECTORY)
         return File(modelsDir, variant.fileName).absolutePath
     }
@@ -106,7 +106,7 @@ class ModelLoader(private val context: Context) {
     /**
      * Validates if a model file exists and has correct size
      */
-    private fun isValidModelFile(filePath: String): Boolean {
+    fun isValidModelFile(filePath: String): Boolean {
         val file = File(filePath)
 
         if (!file.exists()) {
