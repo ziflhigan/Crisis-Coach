@@ -169,6 +169,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 // Step 5: Initialize the main Gemma AI Model (now we know the file exists)
                 Log.d(TAG, "Step 5: Initializing main Gemma AI model...")
+
+                _uiState.update { it.copy(
+                    initState = InitializationState.SUCCESS, // Set to SUCCESS early
+                    isModelReloading = true, // Reuse this flag for initial load
+                    reloadProgress = 0f
+                )}
+
+                // Monitor model loading progress
+                viewModelScope.launch {
+                    app.gemmaModelManager.loadProgress.collect { progress ->
+                        _uiState.update { it.copy(reloadProgress = progress) }
+                    }
+                }
+
                 val savedParams = loadGenerationParams()
 
                 val modelConfig = ModelConfig(
@@ -185,10 +199,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 when (val modelResult = app.gemmaModelManager.initializeModel(modelConfig)) {
                     is ModelInitResult.Error -> {
-                        setInitializationError("Main AI Model Failed", modelResult.message)
+                        _uiState.update { it.copy(
+                            isModelReloading = false,
+                            initState = InitializationState.ERROR,
+                            errorTitle = "Main AI Model Failed",
+                            errorMessage = modelResult.message
+                        )}
                         return@launch
                     }
-                    is ModelInitResult.Success -> Log.i(TAG, "Gemma model initialized successfully.")
+                    is ModelInitResult.Success -> {
+                        Log.i(TAG, "Gemma model initialized successfully.")
+                        _uiState.update { it.copy(isModelReloading = false) }
+                    }
                 }
 
                 // Step 6: Initialize all application services
