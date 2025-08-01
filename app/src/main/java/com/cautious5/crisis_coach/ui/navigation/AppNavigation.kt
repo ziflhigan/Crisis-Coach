@@ -2,11 +2,14 @@ package com.cautious5.crisis_coach.ui.navigation
 
 import android.util.Log
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -72,16 +75,43 @@ val navigationDestinations = listOf(
 /**
  * Main app navigation scaffold with bottom navigation
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppNavigation(
     modifier: Modifier = Modifier,
     navController: NavHostController = rememberNavController(),
-    startDestination: String = Routes.DASHBOARD
+    startDestination: String = Routes.DASHBOARD,
+    onSettingsClick: () -> Unit = {}
 ) {
     Log.d(TAG, "Setting up app navigation with start destination: $startDestination")
 
     Scaffold(
         modifier = modifier,
+        topBar = {
+            TopAppBar(
+                title = {
+                    val currentRoute = navController.getCurrentRoute()
+                    Text(
+                        text = NavigationHelper.getRouteLabel(currentRoute ?: ""),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                actions = {
+                    IconButton(onClick = onSettingsClick) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                )
+            )
+        },
         bottomBar = {
             AppBottomNavigation(navController = navController)
         }

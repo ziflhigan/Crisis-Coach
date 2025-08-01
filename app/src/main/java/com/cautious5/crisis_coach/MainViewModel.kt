@@ -4,6 +4,9 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.cautious5.crisis_coach.model.ai.GenerationParams
+import com.cautious5.crisis_coach.model.ai.HardwarePreference
+import com.cautious5.crisis_coach.model.ai.ModelConfig
 import com.cautious5.crisis_coach.model.ai.ModelLoader
 import com.cautious5.crisis_coach.model.ai.ModelVariant
 import com.cautious5.crisis_coach.model.ai.InitializationResult as ModelInitResult
@@ -14,6 +17,7 @@ import com.cautious5.crisis_coach.utils.Constants.LogTags
 import com.cautious5.crisis_coach.utils.DeviceCapabilityChecker
 import com.cautious5.crisis_coach.utils.HuggingFaceAuthManager
 import com.cautious5.crisis_coach.utils.ModelDownloader
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,10 +47,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val downloadState: ModelDownloader.DownloadState? = null,
         val needsModelDownload: Boolean = false,
         val modelVariantForDownload: ModelVariant? = null,
-        val needsTokenInput: Boolean = false
+        val needsTokenInput: Boolean = false,
+        val showSettingsDialog: Boolean = false,
+        val currentModelConfig: ModelConfig? = null,
+        val modelDownloadStatus: Map<ModelVariant, Boolean> = emptyMap()
     )
 
-    val hfAuthManager by lazy { HuggingFaceAuthManager(getApplication()) }
+    private val hfAuthManager by lazy { HuggingFaceAuthManager(getApplication()) }
     private val modelDownloader by lazy { ModelDownloader(getApplication(), hfAuthManager) }
 
 
@@ -55,20 +62,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         Log.d(TAG, "MainViewModel initialized, starting app initialization...")
+        initializeApp()
 
         // Observe download progress
         viewModelScope.launch {
             modelDownloader.downloadProgress.collect { downloadState ->
-                _uiState.update { it.copy(downloadState = downloadState) }
+                // When the download is no longer in progress, clear the target variant
+                if (downloadState !is ModelDownloader.DownloadState.InProgress) {
+                    _uiState.update { it.copy(
+                        downloadState = downloadState,
+                        modelVariantForDownload = null // Clear the variant when done
+                    )}
+                } else {
+                    _uiState.update { it.copy(downloadState = downloadState) }
+                }
 
-                // When download completes successfully, retry initialization
+                // When download completes successfully, re-check statuses
                 if (downloadState is ModelDownloader.DownloadState.Completed) {
-                    initializeApp()
+                    checkAllModelStatuses()
                 }
             }
         }
-
-        initializeApp()
     }
 
     /**
@@ -85,6 +99,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     needsModelDownload = false
                 )
             }
+
+            checkAllModelStatuses()
 
             try {
                 val app = getApplication<CrisisCoachApplication>()
@@ -146,7 +162,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 // Step 5: Initialize the main Gemma AI Model (now we know the file exists)
                 Log.d(TAG, "Step 5: Initializing main Gemma AI model...")
-                val modelConfig = com.cautious5.crisis_coach.model.ai.ModelConfig(
+                val modelConfig = ModelConfig(
                     variant = deviceCapability.recommendedModelVariant,
                     hardwarePreference = deviceCapability.recommendedHardwarePreference,
                     modelPath = ""
@@ -177,6 +193,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun showSettings() {
+        _uiState.update { it.copy(showSettingsDialog = true) }
+    }
+
+    fun hideSettings() {
+        _uiState.update { it.copy(showSettingsDialog = false) }
+    }
+
+    fun selectModelVariant(variant: ModelVariant) {
+        val isDownloaded = _uiState.value.modelDownloadStatus[variant] ?: false
+
+        if (isDownloaded) {
+            // Model exists, update the config and re-initialize the model
+            val app = getApplication<CrisisCoachApplication>()
+            val newConfig = ModelConfig(
+                variant = variant,
+                hardwarePreference = _uiState.value.currentModelConfig?.hardwarePreference ?: HardwarePreference.AUTO,
+                modelPath = app.gemmaModelManager.modelLoader.getInternalModelPath(variant)
+            )
+            _uiState.update { it.copy(currentModelConfig = newConfig) }
+            viewModelScope.launch {
+                app.gemmaModelManager.initializeModel(newConfig)
+            }
+        } else {
+            // Model needs to be downloaded, set it as the target for download
+            _uiState.update { it.copy(modelVariantForDownload = variant) }
+            // Trigger the download flow
+            startModelDownload(variant)
+        }
+    }
+
+    fun updateHardwarePreference(preference: HardwarePreference) {
+        _uiState.value.currentModelConfig?.let { config ->
+            val newConfig = config.copy(hardwarePreference = preference)
+            _uiState.update { it.copy(currentModelConfig = newConfig) }
+            // Reinitialize model with new preference
+            viewModelScope.launch {
+                getApplication<CrisisCoachApplication>().gemmaModelManager.initializeModel(newConfig)
+            }
+        }
+    }
+
+    fun updateGenerationParams(params: GenerationParams) {
+        _uiState.value.currentModelConfig?.let { config ->
+            val newConfig = config.copy(
+                temperature = params.temperature,
+                topK = params.topK,
+                topP = params.topP,
+                maxOutputTokens = params.maxOutputTokens
+            )
+            _uiState.update { it.copy(currentModelConfig = newConfig) }
+        }
+    }
+
     /**
      * Updates the UI state to show an error.
      */
@@ -191,12 +261,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun checkAllModelStatuses() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val app = getApplication<CrisisCoachApplication>()
+            val statuses = ModelVariant.entries.associateWith { variant ->
+                val modelPath = app.gemmaModelManager.modelLoader.getInternalModelPath(variant)
+                app.gemmaModelManager.modelLoader.isValidModelFile(modelPath)
+            }
+            _uiState.update { it.copy(modelDownloadStatus = statuses) }
+        }
+    }
+
     fun startModelDownload(modelVariant: ModelVariant) {
         _uiState.update { it.copy(modelVariantForDownload = modelVariant) }
 
         if (!hfAuthManager.isAuthenticated()) {
-            Log.d(TAG, "Authentication needed. Triggering auth flow event for ${modelVariant.displayName}")
-            _triggerAuthFlow.value = modelVariant // Emit the event
+            Log.d(TAG, "Authentication needed. Triggering auth flow for ${modelVariant.displayName}")
+            _triggerAuthFlow.value = modelVariant
         } else {
             Log.d(TAG, "Already authenticated. Starting download for ${modelVariant.displayName}")
             modelDownloader.startDownload(modelVariant)
@@ -209,6 +290,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cancelDownload() {
         modelDownloader.cancel()
+        // Also clear the targeted variant when cancelling
+        _uiState.update { it.copy(modelVariantForDownload = null) }
     }
 
     fun retryWithAuth(modelVariant: ModelVariant) {
