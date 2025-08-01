@@ -223,15 +223,34 @@ class GemmaModelManager private constructor(
                     visionSessionConfig = currentModelConfig // Store the config used
                 }
 
-                // Add query and image
-                visionSession?.addQueryChunk(prompt)
-                visionSession?.addImage(mpImage)
+                // Try a simpler approach - combine prompt and image in one call
+                val response = suspendCancellableCoroutine { continuation ->
+                    try {
+                        // Reset the session for each image analysis
+                        visionSession?.close()
+                        visionSession = createVisionSession(currentModelConfig)
+
+                        // Add the prompt first
+                        visionSession?.addQueryChunk(prompt)
+
+                        // Then add the image
+                        visionSession?.addImage(mpImage)
+
+                        // Generate response
+                        val result = visionSession?.generateResponse()
+
+                        if (result != null) {
+                            continuation.resume(result)
+                        } else {
+                            continuation.resumeWithException(Exception("No response from vision session"))
+                        }
+                    } catch (e: Exception) {
+                        continuation.resumeWithException(e)
+                    }
+                }
 
                 val inferenceTime = System.currentTimeMillis() - startTime
                 Log.d(TAG, "Image analysis completed in ${inferenceTime}ms")
-
-                // Generate response synchronously for images
-                val response = visionSession?.generateResponse() ?: "Unable to analyze image"
 
                 // Update performance metrics
                 _performanceMetrics.value = _performanceMetrics.value.withNewInference(inferenceTime)
