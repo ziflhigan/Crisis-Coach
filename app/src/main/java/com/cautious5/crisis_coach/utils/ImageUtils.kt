@@ -41,22 +41,30 @@ object ImageUtils {
     )
 
     /**
-     * Loads and preprocesses an image from URI
+     * Main function to load and preprocess an image from a URI.
+     * This orchestrates loading, orientation correction, resizing, and format conversion.
      */
     fun loadAndPreprocessImage(
         context: Context,
         uri: Uri,
         config: PreprocessConfig = PreprocessConfig()
     ): Result<Bitmap> = runCatching {
-
-        val bitmap = loadBitmapFromUri(context, uri)
+        // Step 1: Load bitmap from URI
+        var bitmap = loadBitmapFromUri(context, uri)
             ?: throw IOException("Failed to load bitmap from URI")
 
+        // Step 2: Correct orientation if enabled, using EXIF data from the URI
+        if (config.correctOrientation) {
+            bitmap = correctImageOrientation(context, bitmap, uri)
+        }
+
+        // Step 3: Apply other preprocessing steps like resizing
         preprocessBitmap(bitmap, config)
     }
 
     /**
-     * Preprocesses a bitmap according to the given configuration
+     * Preprocesses a bitmap according to the given configuration (resize and format).
+     * This function assumes orientation is already correct.
      */
     fun preprocessBitmap(
         bitmap: Bitmap,
@@ -78,7 +86,6 @@ object ImageUtils {
             processed = processed.copy(config.outputFormat, false)
                 ?: throw IllegalStateException("Failed to convert bitmap format")
         }
-
         return processed
     }
 
@@ -134,35 +141,28 @@ object ImageUtils {
     }
 
     /**
-     * Corrects image orientation based on EXIF data
+     * Corrects image orientation based on EXIF data from a Uri.
      */
-    fun correctImageOrientation(bitmap: Bitmap, imagePath: String): Bitmap {
+    fun correctImageOrientation(context: Context, bitmap: Bitmap, imageUri: Uri): Bitmap {
         return try {
-            val exif = ExifInterface(imagePath)
-            val orientation = exif.getAttributeInt(
-                ExifInterface.TAG_ORIENTATION,
-                ExifInterface.ORIENTATION_NORMAL
-            )
+            context.contentResolver.openInputStream(imageUri)?.use { inputStream ->
+                val exif = ExifInterface(inputStream)
+                val orientation = exif.getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL
+                )
 
-            val matrix = Matrix()
-            when (orientation) {
-                ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
-                ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
-                ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
-                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
-                ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
-                else -> return bitmap
-            }
-
-            Bitmap.createBitmap(
-                bitmap,
-                0,
-                0,
-                bitmap.width,
-                bitmap.height,
-                matrix,
-                true
-            )
+                val matrix = Matrix()
+                when (orientation) {
+                    ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                    ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                    ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                    ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+                    ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+                    else -> return bitmap
+                }
+                Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            } ?: bitmap
         } catch (e: Exception) {
             Log.e(TAG, "Failed to correct image orientation: ${e.message}")
             bitmap

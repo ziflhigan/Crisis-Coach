@@ -164,7 +164,12 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
 
         viewModelScope.launch {
             try {
-                val result = ImageUtils.loadAndPreprocessImage(getApplication(), uri)
+                val result = ImageUtils.loadAndPreprocessImage(
+                    context = getApplication(),
+                    uri = uri,
+                    config = ImageUtils.PreprocessConfig(correctOrientation = true)
+                )
+
                 if (result.isSuccess) {
                     result.getOrNull()?.let { bitmap ->
                         setSelectedImage(bitmap, uri)

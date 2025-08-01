@@ -194,10 +194,8 @@ class GemmaModelManager private constructor(
      */
     suspend fun generateFromImage(
         image: Bitmap,
-        prompt: String = "Describe what you see and provide relevant advice.",
-        maxTokens: Int? = null
+        prompt: String = "Describe what you see and provide relevant advice."
     ): GenerationResult = withContext(Dispatchers.IO) {
-
         if (_modelState.value != ModelState.READY) {
             return@withContext GenerationResult.Error("Model not ready. Current state: ${_modelState.value}")
         }
@@ -206,62 +204,40 @@ class GemmaModelManager private constructor(
 
         return@withContext inferenceDebugMutex.withLock {
             _modelState.value = ModelState.BUSY
-
             try {
                 val startTime = System.currentTimeMillis()
 
-                // Preprocess image
-                val processedImage = preprocessImage(image)
-                val mpImage = BitmapImageBuilder(processedImage).build()
-
-                // Recreate session if config changes
+                // Recreate session only if the configuration has changed
                 val currentModelConfig = _currentConfig.value
                 if (visionSession == null || currentModelConfig != visionSessionConfig) {
                     Log.d(TAG, "Creating new vision session. Reason: New session or config change.")
-                    visionSession?.close() // Close old session
+                    visionSession?.close()
                     visionSession = createVisionSession(currentModelConfig)
-                    visionSessionConfig = currentModelConfig // Store the config used
+                    visionSessionConfig = currentModelConfig
                 }
 
-                // Try a simpler approach - combine prompt and image in one call
-                val response = suspendCancellableCoroutine { continuation ->
-                    try {
-                        // Reset the session for each image analysis
-                        visionSession?.close()
-                        visionSession = createVisionSession(currentModelConfig)
+                // The image passed in should already be preprocessed
+                val mpImage = BitmapImageBuilder(image).build()
 
-                        // Add the prompt first
-                        visionSession?.addQueryChunk(prompt)
-
-                        // Then add the image
-                        visionSession?.addImage(mpImage)
-
-                        // Generate response
-                        val result = visionSession?.generateResponse()
-
-                        if (result != null) {
-                            continuation.resume(result)
-                        } else {
-                            continuation.resumeWithException(Exception("No response from vision session"))
-                        }
-                    } catch (e: Exception) {
-                        continuation.resumeWithException(e)
-                    }
-                }
+                visionSession?.addQueryChunk(prompt)
+                visionSession?.addImage(mpImage)
+                val response = visionSession?.generateResponse()
 
                 val inferenceTime = System.currentTimeMillis() - startTime
                 Log.d(TAG, "Image analysis completed in ${inferenceTime}ms")
 
-                // Update performance metrics
                 _performanceMetrics.value = _performanceMetrics.value.withNewInference(inferenceTime)
                 _modelState.value = ModelState.READY
 
-                GenerationResult.Success(
-                    text = response,
-                    inferenceTimeMs = inferenceTime,
-                    tokensGenerated = response.split(" ").size
-                )
-
+                if (response != null) {
+                    GenerationResult.Success(
+                        text = response,
+                        inferenceTimeMs = inferenceTime,
+                        tokensGenerated = response.split(" ").size
+                    )
+                } else {
+                    GenerationResult.Error("No response from vision session")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Image analysis failed: ${e.message}", e)
                 _modelState.value = ModelState.READY
@@ -326,6 +302,7 @@ class GemmaModelManager private constructor(
         val optionsBuilder = LlmInference.LlmInferenceOptions.builder()
             .setModelPath(modelPath)
             .setMaxTokens(config.maxOutputTokens)
+            .setMaxNumImages(1) // Add this line for vision capabilities
 
         when (config.hardwarePreference) {
             HardwarePreference.GPU_PREFERRED -> {
@@ -388,19 +365,6 @@ class GemmaModelManager private constructor(
             .build()
 
         return LlmInferenceSession.createFromOptions(llmInference!!, sessionOptions)
-    }
-
-    /**
-     * Preprocesses image for model input
-     */
-    private fun preprocessImage(bitmap: Bitmap): Bitmap {
-        // Resize image to model's expected input size (typically 256x256 or 512x512)
-        val targetSize = 256
-        return if (bitmap.width != targetSize || bitmap.height != targetSize) {
-            Bitmap.createScaledBitmap(bitmap, targetSize, targetSize, true)
-        } else {
-            bitmap
-        }
     }
 }
 
