@@ -764,7 +764,7 @@ private fun HardwareSettingsTab(
                 )
                 Text(
                     modifier = Modifier.weight(1f),
-                    text = "GPU acceleration can significantly speed up AI processing but may use more battery. CPU-only mode is more power efficient.",
+                    text = "GPU acceleration can significantly speed up AI processing, while being power efficient. Use if required (Needs > 6GB RAM device).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer
                 )
