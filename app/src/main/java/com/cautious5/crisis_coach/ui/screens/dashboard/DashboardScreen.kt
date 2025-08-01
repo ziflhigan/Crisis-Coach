@@ -1,5 +1,7 @@
 package com.cautious5.crisis_coach.ui.screens.dashboard
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -59,20 +62,29 @@ fun DashboardScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    DashboardScreenContent(
-        uiState = uiState,
-        onNavigateToTranslate = onNavigateToTranslate,
-        onNavigateToImageTriage = onNavigateToImageTriage,
-        onNavigateToKnowledge = onNavigateToKnowledge,
-        onActivityClick = { activity ->
-            when (activity.type) {
-                ActivityType.TRANSLATION -> onNavigateToTranslate()
-                ActivityType.MEDICAL_ANALYSIS,
-                ActivityType.STRUCTURAL_ANALYSIS -> onNavigateToImageTriage()
-                ActivityType.KNOWLEDGE_QUERY -> onNavigateToKnowledge()
+    Box(modifier = Modifier.fillMaxSize()){
+        DashboardScreenContent(
+            uiState = uiState,
+            onNavigateToTranslate = onNavigateToTranslate,
+            onNavigateToImageTriage = onNavigateToImageTriage,
+            onNavigateToKnowledge = onNavigateToKnowledge,
+            onActivityClick = { activity ->
+                when (activity.type) {
+                    ActivityType.TRANSLATION -> onNavigateToTranslate()
+                    ActivityType.MEDICAL_ANALYSIS,
+                    ActivityType.STRUCTURAL_ANALYSIS -> onNavigateToImageTriage()
+                    ActivityType.KNOWLEDGE_QUERY -> onNavigateToKnowledge()
+                }
             }
+        )
+
+        if (uiState.isModelInitializing) {
+            LoadingOverlay(
+                modelState = uiState.modelState,
+                progress = uiState.loadingProgress
+            )
         }
-    )
+    }
 }
 
 @Composable
@@ -913,6 +925,46 @@ private fun DashboardScreenDarkPreview() {
                 onNavigateToImageTriage = {},
                 onNavigateToKnowledge = {},
                 onActivityClick = {}
+            )
+        }
+    }
+}
+
+@Composable
+private fun LoadingOverlay(
+    modelState: ModelState,
+    progress: Float
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.6f))
+            .clickable(enabled = false, onClick = {}),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(0.8f),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "Initializing Crisis Coach",
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White,
+                textAlign = TextAlign.Center
+            )
+
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.White,
+                trackColor = Color.White.copy(alpha = 0.3f)
+            )
+
+            Text(
+                text = if (modelState == ModelState.LOADING) "Loading AI model..." else "Please wait...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.8f)
             )
         }
     }

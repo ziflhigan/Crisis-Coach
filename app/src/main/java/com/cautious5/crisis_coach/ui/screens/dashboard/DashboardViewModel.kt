@@ -3,12 +3,15 @@ package com.cautious5.crisis_coach.ui.screens.dashboard
 import android.app.Application
 import android.util.Log
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.*
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.cautious5.crisis_coach.CrisisCoachApplication
 import com.cautious5.crisis_coach.model.ai.GemmaModelManager
 import com.cautious5.crisis_coach.model.ai.ModelState
 import com.cautious5.crisis_coach.utils.Constants.LogTags
+import com.cautious5.crisis_coach.utils.DeviceCapabilityChecker
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -25,19 +28,20 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     // Model manager for status monitoring
     private val gemmaModelManager: GemmaModelManager by lazy {
-        GemmaModelManager.getInstance(getApplication())
+        (getApplication<CrisisCoachApplication>()).gemmaModelManager
     }
 
     /**
      * UI state for dashboard screen
      */
     data class DashboardUiState(
+        val isModelInitializing: Boolean = true,
         val modelState: ModelState = ModelState.UNINITIALIZED,
-        val isOfflineMode: Boolean = true, // Always offline for this app
-        val recentActivities: List<ActivityItem> = emptyList(),
+        val loadingProgress: Float = 0f,
         val deviceInfo: String = "",
         val memoryUsage: String = "",
-        val lastUpdateTime: Long = System.currentTimeMillis()
+        val recentActivities: List<ActivityItem> = emptyList(),
+        val isOfflineMode: Boolean = true
     )
 
     // State flows
@@ -56,15 +60,28 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
      * Initialize the ViewModel
      */
     private fun initialize() {
-        // Observe model state changes
+        // Observe the central model state from GemmaModelManager
         viewModelScope.launch {
-            gemmaModelManager.modelState.collect { modelState ->
-                Log.d(TAG, "Model state changed: $modelState")
-                _uiState.value = _uiState.value.copy(modelState = modelState)
+            gemmaModelManager.modelState.collect { state ->
+                Log.d(TAG, "Dashboard detected model state change: $state")
+                _uiState.update {
+                    it.copy(
+                        modelState = state,
+                        isModelInitializing = state in listOf(
+                            ModelState.LOADING,
+                            ModelState.UNINITIALIZED
+                        )
+                    )
+                }
             }
         }
 
-        // Load initial data
+        viewModelScope.launch {
+            gemmaModelManager.loadProgress.collect { progress ->
+                _uiState.update { it.copy(loadingProgress = progress) }
+            }
+        }
+
         loadInitialData()
     }
 
@@ -124,8 +141,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
         // Update UI state
         _uiState.value = _uiState.value.copy(
-            recentActivities = recentActivities.toList(),
-            lastUpdateTime = System.currentTimeMillis()
+            recentActivities = recentActivities.toList()
         )
     }
 
@@ -136,8 +152,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         Log.d(TAG, "Clearing all activities")
         recentActivities.clear()
         _uiState.value = _uiState.value.copy(
-            recentActivities = emptyList(),
-            lastUpdateTime = System.currentTimeMillis()
+            recentActivities = emptyList()
         )
     }
 
@@ -200,7 +215,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                     title = "Emergency Guide: CPR procedure",
                     snippet = "How to perform CPR on an adult patient...",
                     timestamp = "10 min ago",
-                    icon = Icons.Default.Help
+                    icon = Icons.AutoMirrored.Filled.Help
                 )
             )
 
@@ -226,15 +241,22 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
      * Get memory usage information
      */
     private fun getMemoryUsage(): String {
+        val context = getApplication<Application>().applicationContext
         return try {
-            val modelMemory = gemmaModelManager.getMemoryUsage()
-            if (modelMemory > 0) {
-                "AI Model: ${modelMemory}MB"
-            } else {
-                "Memory usage: calculating..."
-            }
+            val totalRam = DeviceCapabilityChecker.getTotalRamMB(context)
+            val availableRam = DeviceCapabilityChecker.getAvailableRamMB(context)
+            val usedRam = totalRam - availableRam
+            val usedRamGB = "%.1f".format(usedRam / 1024f)
+            val totalRamGB = "%.1f".format(totalRam / 1024f)
+
+            val usageString = "RAM: $usedRamGB GB / $totalRamGB GB Used"
+            Log.d(TAG, "Memory Usage Calculated: $usageString")
+            usageString
         } catch (e: Exception) {
-            "Memory usage unavailable"
+            Log.e(TAG, "Failed to get real memory usage", e)
+            // Fallback to the model's approximate usage if the real check fails
+            val modelMemory = gemmaModelManager.getMemoryUsage()
+            if (modelMemory > 0) "AI Model: ${modelMemory}MB" else "Memory usage unavailable"
         }
     }
 
@@ -245,7 +267,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         ActivityType.TRANSLATION -> Icons.Default.Translate
         ActivityType.MEDICAL_ANALYSIS -> Icons.Default.LocalHospital
         ActivityType.STRUCTURAL_ANALYSIS -> Icons.Default.Engineering
-        ActivityType.KNOWLEDGE_QUERY -> Icons.Default.Help
+        ActivityType.KNOWLEDGE_QUERY -> Icons.AutoMirrored.Filled.Help
     }
 
     /**
@@ -276,8 +298,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         recentActivities.addAll(updatedActivities)
 
         _uiState.value = _uiState.value.copy(
-            recentActivities = recentActivities.toList(),
-            lastUpdateTime = System.currentTimeMillis()
+            recentActivities = recentActivities.toList()
         )
     }
 
