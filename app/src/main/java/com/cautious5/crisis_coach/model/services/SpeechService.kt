@@ -9,10 +9,12 @@ import android.speech.SpeechRecognizer
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Service for offline speech recognition using Android's SpeechRecognizer
@@ -82,17 +84,27 @@ class SpeechService(private val context: Context) {
     suspend fun startRecognition(
         languageCode: String = _currentLanguage.value,
         prompt: String = "Speak now"
-    ): SpeechResult {
+    ): SpeechResult = withContext(Dispatchers.Main) {
 
+        // Clean up any previous recognition first
         if (_recognitionState.value != RecognitionState.IDLE) {
-            return SpeechResult.Error("Speech recognition already in progress")
+            Log.w(TAG, "Previous recognition still active, cleaning up...")
+            stopRecognition()
+            delay(100) // Give it time to clean up
         }
 
         Log.d(TAG, "Starting speech recognition (language: $languageCode)")
         _recognitionState.value = RecognitionState.LISTENING
         _currentLanguage.value = languageCode
-        _partialResultsFlow.value = "" // Reset partial results
+        _partialResultsFlow.value = ""
+
         try {
+            // Recreate speech recognizer if needed
+            if (speechRecognizer == null) {
+                Log.d(TAG, "Creating new SpeechRecognizer instance")
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
+            }
+
             resultChannel = Channel(capacity = 1)
             val intent = createRecognitionIntent(languageCode, prompt)
 
@@ -103,21 +115,27 @@ class SpeechService(private val context: Context) {
             // Start listening
             speechRecognizer?.startListening(intent)
 
-            // Wait for result
-            val result = resultChannel!!.receive()
+            // Wait for result with timeout
+            val result = withTimeoutOrNull(30000) { // 30 second timeout
+                resultChannel!!.receive()
+            } ?: run {
+                Log.w(TAG, "Speech recognition timed out")
+                cleanup()
+                SpeechResult.Error("Speech recognition timed out")
+            }
 
             Log.d(TAG, "Speech recognition completed: ${result.javaClass.simpleName}")
-            return result
+            return@withContext result
 
         } catch (e: Exception) {
             val error = "Speech recognition failed: ${e.message}"
             Log.e(TAG, error, e)
-            _recognitionState.value = RecognitionState.ERROR
-            return SpeechResult.Error(error, e)
-        } finally {
             cleanup()
+            _recognitionState.value = RecognitionState.IDLE
+            return@withContext SpeechResult.Error(error, e)
         }
     }
+
 
     /**
      * Stops ongoing speech recognition
@@ -126,7 +144,8 @@ class SpeechService(private val context: Context) {
         Log.d(TAG, "Stopping speech recognition")
 
         try {
-            speechRecognizer?.stopListening()
+            speechRecognizer?.cancel()
+            cleanup()
             _recognitionState.value = RecognitionState.IDLE
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping speech recognition: ${e.message}", e)
@@ -210,14 +229,10 @@ class SpeechService(private val context: Context) {
         Log.d(TAG, "Releasing SpeechService resources")
 
         try {
+            cleanup()
             speechRecognizer?.destroy()
             speechRecognizer = null
-            recognitionListener = null
-            resultChannel?.close()
-            resultChannel = null
-
             _recognitionState.value = RecognitionState.IDLE
-
         } catch (e: Exception) {
             Log.e(TAG, "Error releasing SpeechService resources: ${e.message}", e)
         }
@@ -285,8 +300,18 @@ class SpeechService(private val context: Context) {
                 val errorMessage = getErrorMessage(error)
                 Log.e(TAG, "Speech recognition error: $errorMessage (code: $error)")
 
-                _recognitionState.value = RecognitionState.ERROR
-                _partialResultsFlow.value = "" // Clear partial results on error
+                // Special handling for recognizer busy error
+                if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+                    Log.w(TAG, "Recognizer busy, will clean up and retry")
+                    // Force cleanup
+                    cleanup()
+                    // Recreate recognizer
+                    speechRecognizer?.destroy()
+                    speechRecognizer = null
+                }
+
+                _recognitionState.value = RecognitionState.IDLE
+                _partialResultsFlow.value = ""
                 resultChannel?.trySend(SpeechResult.Error(errorMessage))
             }
 
@@ -346,6 +371,7 @@ class SpeechService(private val context: Context) {
             SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recognition service busy"
             SpeechRecognizer.ERROR_SERVER -> "Server error"
             SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech input detected"
+            13 -> "Recognition service busy (13)"
             else -> "Unknown error (code: $errorCode)"
         }
     }
@@ -354,9 +380,15 @@ class SpeechService(private val context: Context) {
      * Cleanup resources after recognition
      */
     private fun cleanup() {
-        recognitionListener = null
-        resultChannel?.close()
-        resultChannel = null
+        try {
+            speechRecognizer?.cancel()
+            recognitionListener = null
+            resultChannel?.close()
+            resultChannel = null
+            _recognitionState.value = RecognitionState.IDLE
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during cleanup: ${e.message}", e)
+        }
     }
 }
 

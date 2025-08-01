@@ -25,7 +25,7 @@ class TranslationService(
     private val context: Context,
     private val gemmaModelManager: GemmaModelManager,
     val speechService: SpeechService,
-    private val textToSpeechService: TextToSpeechService
+    val textToSpeechService: TextToSpeechService
 ) {
 
     companion object {
