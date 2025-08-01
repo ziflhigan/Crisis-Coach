@@ -1,5 +1,7 @@
 package com.cautious5.crisis_coach
 
+import android.app.Application
+import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
@@ -24,6 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -107,28 +110,19 @@ class MainActivity : ComponentActivity() {
                         color = MaterialTheme.colorScheme.background
                     ) {
                         when (uiState.initState) {
-                            MainViewModel.InitializationState.LOADING -> {
-                                LoadingScreen(deviceCapability = uiState.deviceCapability)
-                            }
-
                             MainViewModel.InitializationState.ERROR -> {
                                 ErrorScreen(
                                     title = uiState.errorTitle ?: "Error",
                                     message = uiState.errorMessage ?: ErrorMessages.UNKNOWN_ERROR,
                                     onRetry = { mainViewModel.initializeApp() },
                                     onDownload = if (uiState.needsModelDownload) {
-                                        { modelVariant ->
-                                            mainViewModel.startModelDownload(
-                                                modelVariant
-                                            )
-                                        }
+                                        { modelVariant -> mainViewModel.startModelDownload(modelVariant) }
                                     } else null,
                                     onCancelDownload = { mainViewModel.cancelDownload() },
                                     downloadState = uiState.downloadState
                                 )
                             }
-
-                            MainViewModel.InitializationState.SUCCESS -> {
+                            else -> {
                                 AppNavigation(
                                     onSettingsClick = { mainViewModel.showSettings() }
                                 )
@@ -138,7 +132,21 @@ class MainActivity : ComponentActivity() {
                         // Settings Dialog - Always available
                         if (uiState.showSettingsDialog) {
                             SettingsDialog(
-                                currentConfig = uiState.currentModelConfig,
+                                currentConfig = uiState.currentModelConfig ?: run {
+                                    // Create default config if none exists
+                                    val app = application as CrisisCoachApplication
+                                    val currentVariant = app.gemmaModelManager.currentConfig.value?.variant
+                                        ?: ModelVariant.GEMMA_3N_E2B
+                                    ModelConfig(
+                                        variant = currentVariant,
+                                        hardwarePreference = HardwarePreference.AUTO,
+                                        modelPath = "",
+                                        temperature = 1.0f,
+                                        topK = 64,
+                                        topP = 0.95f,
+                                        maxOutputTokens = 512
+                                    )
+                                },
                                 availableVariants = ModelVariant.entries,
                                 downloadState = uiState.downloadState,
                                 modelDownloadStatus = uiState.modelDownloadStatus,
@@ -157,6 +165,10 @@ class MainActivity : ComponentActivity() {
                                     mainViewModel.startModelDownload(variant)
                                 }
                             )
+                        }
+
+                        if (uiState.isModelReloading) {
+                            ModelReloadingDialog(progress = uiState.reloadProgress)
                         }
                     }
 
@@ -645,9 +657,12 @@ private fun HardwareSettingsTab(
     currentPreference: HardwarePreference,
     onHardwarePreferenceChanged: (HardwarePreference) -> Unit
 ) {
+    // Get the context once for the isSupported check.
+    val context = LocalContext.current
+
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
             "Hardware Acceleration",
@@ -661,18 +676,26 @@ private fun HardwareSettingsTab(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
+        // Iterate through all available hardware preferences.
         HardwarePreference.entries.forEach { preference ->
+            // Check if the device actually supports this preference.
+            val isEnabled = DeviceCapabilityChecker.isSupported(context, preference)
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable { onHardwarePreferenceChanged(preference) }
-                    .padding(16.dp),
+                    // Make the entire row clickable to change the selection.
+                    .clickable(enabled = isEnabled) { onHardwarePreferenceChanged(preference) }
+                    // Visually disable the row if not supported.
+                    .alpha(if (isEnabled) 1f else 0.5f)
+                    .padding(horizontal = 8.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 RadioButton(
                     selected = currentPreference == preference,
-                    onClick = { onHardwarePreferenceChanged(preference) }
+                    onClick = { onHardwarePreferenceChanged(preference) },
+                    enabled = isEnabled
                 )
                 Spacer(modifier = Modifier.width(16.dp))
                 Column {
@@ -690,16 +713,16 @@ private fun HardwareSettingsTab(
             }
         }
 
-        // Info card
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.secondaryContainer
             )
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     Icons.Default.Info,
@@ -707,7 +730,8 @@ private fun HardwareSettingsTab(
                     tint = MaterialTheme.colorScheme.onSecondaryContainer
                 )
                 Text(
-                    "GPU acceleration can significantly speed up AI processing but may use more battery. CPU-only mode is more power efficient.",
+                    modifier = Modifier.weight(1f),
+                    text = "GPU acceleration can significantly speed up AI processing but may use more battery. CPU-only mode is more power efficient.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer
                 )
@@ -725,6 +749,15 @@ private fun GenerationSettingsTab(
     var topK by remember { mutableIntStateOf(currentConfig?.topK ?: 64) }
     var topP by remember { mutableFloatStateOf(currentConfig?.topP ?: 0.95f) }
     var maxTokens by remember { mutableIntStateOf(currentConfig?.maxOutputTokens ?: 512) }
+
+    LaunchedEffect(currentConfig) {
+        currentConfig?.let {
+            temperature = it.temperature
+            topK = it.topK
+            topP = it.topP
+            maxTokens = it.maxOutputTokens
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -761,7 +794,7 @@ private fun GenerationSettingsTab(
                         GenerationParams(temperature, topK, topP, maxTokens)
                     )
                 },
-                valueRange = 0f..1f,
+                valueRange = 0f..2f,
                 modifier = Modifier.padding(top = 8.dp)
             )
         }
@@ -795,8 +828,8 @@ private fun GenerationSettingsTab(
                         GenerationParams(temperature, topK, topP, maxTokens)
                     )
                 },
-                valueRange = 1f..100f,
-                steps = 99,
+                valueRange = 1f..64f,
+                steps = 63,
                 modifier = Modifier.padding(top = 8.dp)
             )
         }
@@ -830,7 +863,7 @@ private fun GenerationSettingsTab(
                         GenerationParams(temperature, topK, topP, maxTokens)
                     )
                 },
-                valueRange = 0f..1f,
+                valueRange = 0f..0.95f,
                 modifier = Modifier.padding(top = 8.dp)
             )
         }
@@ -864,8 +897,8 @@ private fun GenerationSettingsTab(
                         GenerationParams(temperature, topK, topP, maxTokens)
                     )
                 },
-                valueRange = 50f..2048f,
-                steps = 39,
+                valueRange = 128f..4096f,
+                steps = (4096 - 128) / 128,
                 modifier = Modifier.padding(top = 8.dp)
             )
         }
@@ -890,6 +923,55 @@ private fun GenerationSettingsTab(
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text("Reset to Defaults")
+        }
+    }
+}
+
+@Composable
+fun ModelReloadingDialog(progress: Float) {
+    Dialog(
+        onDismissRequest = { /* Cannot dismiss while loading */ },
+        properties = DialogProperties(dismissOnClickOutside = false, dismissOnBackPress = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                CircularProgressIndicator()
+
+                Text(
+                    "Updating Hardware Configuration",
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center
+                )
+
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text(
+                    "${(progress * 100).toInt()}%",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Text(
+                    "Please wait while the AI model is reconfigured...",
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

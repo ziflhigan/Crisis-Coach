@@ -1,6 +1,7 @@
 package com.cautious5.crisis_coach
 
 import android.app.Application
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -37,6 +38,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _triggerAuthFlow = MutableStateFlow<ModelVariant?>(null)
     val triggerAuthFlow: StateFlow<ModelVariant?> = _triggerAuthFlow
 
+    private val sharedPrefs by lazy {
+        getApplication<Application>().getSharedPreferences("model_settings", Context.MODE_PRIVATE)
+    }
+
     enum class InitializationState { LOADING, SUCCESS, ERROR }
 
     data class MainUiState(
@@ -50,6 +55,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val needsTokenInput: Boolean = false,
         val showSettingsDialog: Boolean = false,
         val currentModelConfig: ModelConfig? = null,
+        val isModelReloading: Boolean = false,
+        val reloadProgress: Float = 0f,
         val modelDownloadStatus: Map<ModelVariant, Boolean> = emptyMap()
     )
 
@@ -162,11 +169,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 // Step 5: Initialize the main Gemma AI Model (now we know the file exists)
                 Log.d(TAG, "Step 5: Initializing main Gemma AI model...")
+                val savedParams = loadGenerationParams()
+
                 val modelConfig = ModelConfig(
                     variant = deviceCapability.recommendedModelVariant,
                     hardwarePreference = deviceCapability.recommendedHardwarePreference,
-                    modelPath = ""
+                    modelPath = "",
+                    temperature = savedParams.temperature,
+                    topK = savedParams.topK,
+                    topP = savedParams.topP,
+                    maxOutputTokens = savedParams.maxOutputTokens
                 )
+
+                _uiState.update { it.copy(currentModelConfig = modelConfig) }
 
                 when (val modelResult = app.gemmaModelManager.initializeModel(modelConfig)) {
                     is ModelInitResult.Error -> {
@@ -226,11 +241,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateHardwarePreference(preference: HardwarePreference) {
         _uiState.value.currentModelConfig?.let { config ->
+            if (config.hardwarePreference == preference) {
+                Log.d(TAG, "Hardware preference already set to $preference. No change.")
+                return
+            }
+
+            Log.d(TAG, "Updating hardware preference from ${config.hardwarePreference} to $preference")
             val newConfig = config.copy(hardwarePreference = preference)
-            _uiState.update { it.copy(currentModelConfig = newConfig) }
+            _uiState.update { it.copy(
+                currentModelConfig = newConfig,
+                isModelReloading = true,
+                reloadProgress = 0f
+            )}
+
             // Reinitialize model with new preference
             viewModelScope.launch {
-                getApplication<CrisisCoachApplication>().gemmaModelManager.initializeModel(newConfig)
+                try {
+                    Log.d(TAG, "Re-initializing Gemma model with new hardware preference.")
+                    val app = getApplication<CrisisCoachApplication>()
+
+                    // First release the current model
+                    app.gemmaModelManager.releaseModel()
+
+                    // Monitor progress
+                    launch {
+                        app.gemmaModelManager.loadProgress.collect { progress ->
+                            _uiState.update { it.copy(reloadProgress = progress) }
+                        }
+                    }
+
+                    // Reinitialize with new config
+                    when (val result = app.gemmaModelManager.initializeModel(newConfig)) {
+                        is ModelInitResult.Success -> {
+                            Log.i(TAG, "Model reinitialized successfully with $preference")
+                            _uiState.update { it.copy(
+                                isModelReloading = false,
+                                reloadProgress = 1f
+                            )}
+                        }
+                        is ModelInitResult.Error -> {
+                            Log.e(TAG, "Failed to reinitialize model: ${result.message}")
+                            // Revert to previous preference
+                            _uiState.update { it.copy(
+                                currentModelConfig = config,
+                                isModelReloading = false
+                            )}
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error reinitializing model", e)
+                    _uiState.update { it.copy(
+                        currentModelConfig = config,
+                        isModelReloading = false
+                    )}
+                }
             }
         }
     }
@@ -244,6 +308,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 maxOutputTokens = params.maxOutputTokens
             )
             _uiState.update { it.copy(currentModelConfig = newConfig) }
+
+            // Save to SharedPreferences
+            saveGenerationParams(params)
+
+            // Apply to model immediately (no need to reinitialize for generation params)
+            viewModelScope.launch {
+                getApplication<CrisisCoachApplication>().gemmaModelManager.apply {
+                    // The params will be used in the next session creation
+                    Log.d(TAG, "Generation parameters updated and saved")
+                }
+            }
         }
     }
 
@@ -259,6 +334,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 errorMessage = message
             )
         }
+    }
+
+    private fun saveGenerationParams(params: GenerationParams) {
+        sharedPrefs.edit().apply {
+            putFloat("temperature", params.temperature)
+            putInt("top_k", params.topK)
+            putFloat("top_p", params.topP)
+            putInt("max_tokens", params.maxOutputTokens)
+            apply()
+        }
+    }
+
+    // Add this function to load generation params
+    private fun loadGenerationParams(): GenerationParams {
+        return GenerationParams(
+            temperature = sharedPrefs.getFloat("temperature", 0.7f),
+            topK = sharedPrefs.getInt("top_k", 64),
+            topP = sharedPrefs.getFloat("top_p", 0.95f),
+            maxOutputTokens = sharedPrefs.getInt("max_tokens", 512)
+        )
     }
 
     private fun checkAllModelStatuses() {
