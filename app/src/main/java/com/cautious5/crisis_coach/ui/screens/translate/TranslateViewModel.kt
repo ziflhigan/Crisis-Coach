@@ -12,11 +12,13 @@ import com.cautious5.crisis_coach.model.services.TranslationLanguage
 import com.cautious5.crisis_coach.model.services.TranslationService
 import com.cautious5.crisis_coach.model.services.TranslationState
 import com.cautious5.crisis_coach.model.services.VoiceTranslationResult
+import com.cautious5.crisis_coach.utils.Constants
 import com.cautious5.crisis_coach.utils.Constants.DEFAULT_SOURCE_LANGUAGE
 import com.cautious5.crisis_coach.utils.Constants.DEFAULT_TARGET_LANGUAGE
 import com.cautious5.crisis_coach.utils.Constants.LogTags
 import com.cautious5.crisis_coach.utils.Constants.TRANSLATION_MAX_TEXT_LENGTH
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -208,16 +210,27 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
      * Update input text and trigger translation with debouncing
      */
     fun updateInputText(text: String) {
-        translationJob?.cancel() // Cancel any ongoing translation from previous text
+        translationJob?.cancel()
+
         val currentText = if (text.length > TRANSLATION_MAX_TEXT_LENGTH) {
             text.take(TRANSLATION_MAX_TEXT_LENGTH)
         } else {
             text
         }
+
+        // When input text changes, update it.
         _uiState.update { it.copy(inputText = currentText) }
 
+        // If the text is now blank, clear everything.
+        // If not blank, start a new translation job.
         if (currentText.isBlank()) {
             clearTranslation()
+        } else {
+            translationJob = viewModelScope.launch {
+                // Add a debounce delay
+                delay(Constants.TRANSLATION_DEBOUNCE_DELAY_MS)
+                translateText(currentText)
+            }
         }
     }
 
@@ -372,17 +385,10 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
      * Toggle pronunciation guide visibility
      */
     fun togglePronunciationGuide() {
-        val newValue = !_uiState.value.showPronunciationGuide
-        _uiState.value = _uiState.value.copy(showPronunciationGuide = newValue)
-        Log.d(TAG, "Pronunciation guide toggled: $newValue")
+        val currentValue = _uiState.value.showPronunciationGuide
+        Log.d(TAG, "Toggling pronunciation guide visibility to: ${!currentValue}")
 
-        // Re-translate to include/exclude pronunciation guide
-        if (_uiState.value.inputText.isNotBlank()) {
-            translationJob?.cancel()
-            translationJob = viewModelScope.launch {
-                translateText(_uiState.value.inputText)
-            }
-        }
+        _uiState.update { it.copy(showPronunciationGuide = !currentValue) }
     }
 
     /**
@@ -390,14 +396,17 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
      */
     fun clearTranslation() {
         Log.d(TAG, "Clearing translation")
-        _uiState.value = _uiState.value.copy(
-            inputText = "",
-            outputText = "",
-            pronunciationGuide = null,
-            confidence = 0f,
-            canPlayTranslation = false
-        )
         translationJob?.cancel()
+        _uiState.update {
+            it.copy(
+                outputText = "",
+                pronunciationGuide = null,
+                confidence = 0f,
+                canPlayTranslation = false,
+                isTranslating = false,
+                translationState = TranslationState.IDLE
+            )
+        }
     }
 
     /**
