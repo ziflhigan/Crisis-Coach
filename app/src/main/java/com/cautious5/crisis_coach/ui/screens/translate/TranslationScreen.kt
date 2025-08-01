@@ -175,7 +175,8 @@ private fun TranslateScreenContent(
                 error = uiState.error,
                 onPlayTranslation = onPlayTranslation,
                 onTogglePronunciationGuide = onTogglePronunciationGuide,
-                onClearError = onClearError
+                onClearError = onClearError,
+                isTTSReady = uiState.isTTSReady
             )
         }
 
@@ -515,7 +516,8 @@ private fun OutputSection(
     error: String?,
     onPlayTranslation: () -> Unit,
     onTogglePronunciationGuide: () -> Unit,
-    onClearError: () -> Unit
+    onClearError: () -> Unit,
+    isTTSReady: Boolean
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -542,7 +544,8 @@ private fun OutputSection(
                     canPlayTranslation = canPlayTranslation,
                     isSpeaking = isSpeaking,
                     onPlayTranslation = onPlayTranslation,
-                    onTogglePronunciationGuide = onTogglePronunciationGuide
+                    onTogglePronunciationGuide = onTogglePronunciationGuide,
+                    isTTSReady = isTTSReady
                 )
             }
         }
@@ -577,7 +580,8 @@ private fun TranslationOutput(
     canPlayTranslation: Boolean,
     isSpeaking: Boolean,
     onPlayTranslation: () -> Unit,
-    onTogglePronunciationGuide: () -> Unit
+    onTogglePronunciationGuide: () -> Unit,
+    isTTSReady: Boolean
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -607,7 +611,8 @@ private fun TranslationOutput(
                 isSpeaking = isSpeaking,
                 showPronunciationGuide = showPronunciationGuide,
                 onPlayTranslation = onPlayTranslation,
-                onTogglePronunciationGuide = onTogglePronunciationGuide
+                onTogglePronunciationGuide = onTogglePronunciationGuide,
+                isTTSReady = isTTSReady
             )
         }
     }
@@ -638,7 +643,8 @@ private fun TranslationActions(
     isSpeaking: Boolean,
     showPronunciationGuide: Boolean,
     onPlayTranslation: () -> Unit,
-    onTogglePronunciationGuide: () -> Unit
+    onTogglePronunciationGuide: () -> Unit,
+    isTTSReady: Boolean = true
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -648,7 +654,7 @@ private fun TranslationActions(
         if (canPlayTranslation) {
             Button(
                 onClick = onPlayTranslation,
-                enabled = !isSpeaking,
+                enabled = !isSpeaking && isTTSReady,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.playButton
                 )

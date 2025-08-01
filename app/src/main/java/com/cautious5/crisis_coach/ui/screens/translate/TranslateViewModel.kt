@@ -6,13 +6,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cautious5.crisis_coach.CrisisCoachApplication
 import com.cautious5.crisis_coach.model.services.SpeechOutputResult
+import com.cautious5.crisis_coach.model.services.TTSState
 import com.cautious5.crisis_coach.model.services.TextTranslationResult
 import com.cautious5.crisis_coach.model.services.TranslationInitResult
 import com.cautious5.crisis_coach.model.services.TranslationLanguage
 import com.cautious5.crisis_coach.model.services.TranslationService
 import com.cautious5.crisis_coach.model.services.TranslationState
 import com.cautious5.crisis_coach.model.services.VoiceTranslationResult
-import com.cautious5.crisis_coach.utils.Constants
 import com.cautious5.crisis_coach.utils.Constants.DEFAULT_SOURCE_LANGUAGE
 import com.cautious5.crisis_coach.utils.Constants.DEFAULT_TARGET_LANGUAGE
 import com.cautious5.crisis_coach.utils.Constants.LogTags
@@ -41,6 +41,9 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
         (getApplication<CrisisCoachApplication>()).translationService
     }
 
+    private var lastVoiceTranslationTime = 0L
+    private val VOICE_TRANSLATION_DEBOUNCE_MS = 1000L // 1 second debounce
+
     /**
      * UI state for translation screen
      */
@@ -58,7 +61,8 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
         val confidence: Float = 0f,
         val availableLanguages: List<TranslationLanguage> = emptyList(),
         val canPlayTranslation: Boolean = false,
-        val showPronunciationGuide: Boolean = true
+        val showPronunciationGuide: Boolean = true,
+        val isTTSReady: Boolean = false
     )
 
     // State flows
@@ -86,6 +90,7 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
                         loadSupportedLanguages()
                         observeTranslationServiceState()
                         observeSpeechResults() // Observe speech partial results
+                        observeTTSState()
                     }
                     is TranslationInitResult.Error -> {
                         Log.e(TAG, "Failed to initialize translation service: ${initResult.message}")
@@ -95,6 +100,26 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing TranslateViewModel", e)
                 setError("Initialization failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun observeTTSState() {
+        viewModelScope.launch {
+            // Wait a bit for TTS to initialize
+            delay(1000)
+
+            // Check TTS state
+            val ttsState = translationService.textToSpeechService.ttsState.value
+            _uiState.update {
+                it.copy(isTTSReady = ttsState == TTSState.READY)
+            }
+
+            // Continue observing TTS state
+            translationService.textToSpeechService.ttsState.collect { state ->
+                _uiState.update {
+                    it.copy(isTTSReady = state == TTSState.READY)
+                }
             }
         }
     }
@@ -159,6 +184,13 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
      * Start voice translation
      */
     fun startVoiceTranslation() {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastVoiceTranslationTime < VOICE_TRANSLATION_DEBOUNCE_MS) {
+            Log.w(TAG, "Voice translation called too quickly, ignoring")
+            return
+        }
+        lastVoiceTranslationTime = currentTime
+
         Log.d(TAG, "Starting voice translation")
 
         if (_uiState.value.isListening || _uiState.value.isTranslating) {
@@ -210,27 +242,18 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
      * Update input text and trigger translation with debouncing
      */
     fun updateInputText(text: String) {
-        translationJob?.cancel()
-
         val currentText = if (text.length > TRANSLATION_MAX_TEXT_LENGTH) {
             text.take(TRANSLATION_MAX_TEXT_LENGTH)
         } else {
             text
         }
 
-        // When input text changes, update it.
+        // Just update the input text, don't trigger translation
         _uiState.update { it.copy(inputText = currentText) }
 
-        // If the text is now blank, clear everything.
-        // If not blank, start a new translation job.
+        // Clear output if input is empty
         if (currentText.isBlank()) {
             clearTranslation()
-        } else {
-            translationJob = viewModelScope.launch {
-                // Add a debounce delay
-                delay(Constants.TRANSLATION_DEBOUNCE_DELAY_MS)
-                translateText(currentText)
-            }
         }
     }
 
@@ -239,7 +262,10 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
         if (textToTranslate.isBlank()) {
             return
         }
+
+        // Cancel any existing translation job
         translationJob?.cancel()
+
         translationJob = viewModelScope.launch {
             translateText(textToTranslate)
         }
