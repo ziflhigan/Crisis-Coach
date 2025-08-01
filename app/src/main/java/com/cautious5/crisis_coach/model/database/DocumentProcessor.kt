@@ -5,6 +5,10 @@ import android.util.Log
 import com.cautious5.crisis_coach.model.database.entities.EmergencyInfo
 import com.google.gson.Gson
 import com.google.gson.JsonParser
+import com.itextpdf.kernel.pdf.PdfDocument
+import com.itextpdf.kernel.pdf.PdfReader
+import com.itextpdf.kernel.pdf.canvas.parser.PdfTextExtractor
+import com.itextpdf.kernel.pdf.canvas.parser.listener.SimpleTextExtractionStrategy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
@@ -77,10 +81,7 @@ class DocumentProcessor(
                 DocumentFormat.MARKDOWN -> processMarkdownDocument(inputStream, metadata)
                 DocumentFormat.CSV -> processCsvDocument(inputStream, metadata)
                 DocumentFormat.XML -> processXmlDocument(inputStream, metadata)
-                DocumentFormat.PDF -> {
-                    Log.w(TAG, "PDF processing not yet implemented")
-                    emptyList()
-                }
+                DocumentFormat.PDF -> processPdfDocument(inputStream, metadata) //Updated to include PDF Support
             }
 
             if (entries.isEmpty()) {
@@ -262,6 +263,42 @@ class DocumentProcessor(
         }
 
         return entries
+    }
+
+    private fun processPdfDocument(
+        inputStream: InputStream,
+        metadata: DocumentMetadata
+    ): List<EmergencyInfo> {
+        // Declare entries here
+        val entries = mutableListOf<EmergencyInfo>()
+        // Parse the document here
+        var pdfReader: PdfReader? = PdfReader(inputStream)
+        var pdfDocument: PdfDocument? = PdfDocument(pdfReader)
+        val pageCount = pdfDocument?.numberOfPages
+        val extractedText = StringBuilder()
+        for (i in 1..pageCount!!) {
+            val page = pdfDocument?.getPage(i)
+            val text = PdfTextExtractor.getTextFromPage(page, SimpleTextExtractionStrategy())
+            extractedText.append(text)
+        }
+        // free up memory n close
+        pdfReader?.close()
+        pdfDocument?.close()
+        inputStream.close()
+
+        Log.i(TAG, extractedText.toString()) // Purely debugging
+
+        // Implement Chunking here and then return the entries
+        // addition of entries will have metadata in it
+
+        val final_text = extractedText.toString()
+
+        return when (metadata.chunkingStrategy) {
+            ChunkingStrategy.FIXED_SIZE -> chunkBySize(final_text, metadata)
+            ChunkingStrategy.SENTENCE_BASED -> chunkBySentences(final_text, metadata)
+            ChunkingStrategy.PARAGRAPH_BASED -> chunkByParagraphs(final_text, metadata)
+            ChunkingStrategy.SEMANTIC -> chunkBySize(final_text, metadata) // Fallback for now
+        }
     }
 
     // Chunking strategies

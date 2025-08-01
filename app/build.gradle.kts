@@ -99,4 +99,7 @@ dependencies {
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.okhttp)
+
+    // PDFbox
+    implementation(libs.itext7.core)
 }

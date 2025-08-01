@@ -2,6 +2,7 @@ package com.cautious5.crisis_coach.model.database
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.res.AssetManager
 import android.util.Log
 import com.cautious5.crisis_coach.model.database.entities.EmergencyInfo
 import com.cautious5.crisis_coach.model.database.entities.EmergencyInfo.Companion.Priorities
@@ -35,6 +36,7 @@ class DatabaseInitializer(
         // Additional document sources
         private const val MARKDOWN_DOCS_PATH = "data/emergency_procedures.md"
         private const val CSV_DATA_PATH = "data/medical_protocols.csv"
+        private const val PDF_DATA_PATH = "data/pdfs/"
 
         // ...
     }
@@ -183,6 +185,27 @@ class DatabaseInitializer(
             )?.let { entries ->
                 allEntries.addAll(entries)
                 sourceCount++
+            }
+
+            // 4. Load PDF data (if exists)
+            // Return list of files
+            val assetManager = context.assets
+            val files = assetManager.list(PDF_DATA_PATH)
+            if (files != null) {
+                for (file in files) {
+                    loadDocumentFromAsset(
+                        file,
+                        DocumentProcessor.DocumentMetadata(
+                            source = "Emergency Guides",
+                            format = DocumentProcessor.DocumentFormat.PDF,
+                            category = "emergency",
+                            priority = 1
+                        )
+                    )?.let { entries ->
+                        allEntries.addAll(entries)
+                        sourceCount++
+                    }
+                }
             }
 
             // If no documents loaded, create default data
