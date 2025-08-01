@@ -1,6 +1,7 @@
 package com.cautious5.crisis_coach.model.ai
 
 import android.content.Context
+import android.content.res.AssetFileDescriptor
 import android.os.Environment
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -9,6 +10,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 
 /**
  * Handles model file discovery, validation, and loading operations
@@ -66,8 +68,7 @@ class ModelLoader(private val context: Context) {
                 }
             }
 
-            // Try to extract from assets
-            val assetModelPath = extractModelFromAssets(variant)
+            val assetModelPath = extractModelFromAssets(variant) {}
             if (assetModelPath != null) {
                 Log.d(TAG, "Extracted model from assets: $assetModelPath")
                 return@withContext LoadResult.Success(assetModelPath)
@@ -80,6 +81,47 @@ class ModelLoader(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Error loading model: ${e.message}", e)
             return@withContext LoadResult.Error("Failed to load model: ${e.message}", e)
+        }
+    }
+
+    suspend fun prepareModelFile(
+        variant: ModelVariant,
+        onProgress: (Float) -> Unit
+    ): String? {
+        val internalPath = getInternalModelPath(variant)
+        if (isValidModelFile(internalPath)) {
+            Log.d(TAG, "Model is already prepared in internal storage.")
+            onProgress(1.0f)
+            return internalPath
+        }
+        // If not found, extract it from assets with progress reporting.
+        Log.d(TAG, "Model not found internally, preparing from assets...")
+        return extractModelFromAssets(variant, onProgress)
+    }
+
+    suspend fun copyTaskFile(
+        srcFd: AssetFileDescriptor,
+        dst: File,
+        onProgress: (Float) -> Unit   // 0f‥1f
+    ) = withContext(Dispatchers.IO) {
+        srcFd.createInputStream().use { input ->
+            dst.outputStream().use { output ->
+                val buf = ByteArray(8192)
+                var copied = 0L
+                val total  = srcFd.length
+                var lastPct = 0
+                while (true) {
+                    val read = input.read(buf)
+                    if (read <= 0) break
+                    output.write(buf, 0, read)
+                    copied += read
+                    val pct = ((copied * 100) / total).toInt()
+                    if (pct != lastPct) { // throttle UI updates
+                        lastPct = pct
+                        onProgress(pct / 100f)
+                    }
+                }
+            }
         }
     }
 
@@ -176,14 +218,16 @@ class ModelLoader(private val context: Context) {
     /**
      * Extracts model from assets directory to internal storage
      */
-    private suspend fun extractModelFromAssets(variant: ModelVariant): String? {
+    private suspend fun extractModelFromAssets(
+        variant: ModelVariant,
+        onProgress: (Float) -> Unit
+    ): String? {
         return try {
-            Log.d(TAG, "Extracting model from assets...")
+            Log.d(TAG, "Extracting model from assets with progress...")
             val assetPath = "$ASSETS_MODELS_PATH/${variant.fileName}"
             val targetPath = getInternalModelPath(variant)
             val targetFile = File(targetPath)
 
-            // Check if asset exists
             context.assets.list(ASSETS_MODELS_PATH)?.let { assetFiles ->
                 if (!assetFiles.contains(variant.fileName)) {
                     Log.d(TAG, "Model not found in assets: $assetPath")
@@ -194,14 +238,10 @@ class ModelLoader(private val context: Context) {
                 return null
             }
 
-            // Create parent directory
             targetFile.parentFile?.mkdirs()
 
-            // Extract from assets
             context.assets.open(assetPath).use { input ->
-                FileOutputStream(targetFile).use { output ->
-                    input.copyTo(output)
-                }
+                copyStreamWithProgress(input, targetFile, context.assets.openFd(assetPath).length, onProgress)
             }
 
             if (isValidModelFile(targetPath)) {
@@ -215,6 +255,29 @@ class ModelLoader(private val context: Context) {
         } catch (e: IOException) {
             Log.e(TAG, "Failed to extract model from assets: ${e.message}", e)
             null
+        }
+    }
+
+    private suspend fun copyStreamWithProgress(
+        input: InputStream,
+        dst: File,
+        totalBytes: Long,
+        onProgress: (Float) -> Unit
+    ) = withContext(Dispatchers.IO) {
+        input.use { inputStream ->
+            dst.outputStream().use { output ->
+                val buffer = ByteArray(8 * 1024) // 8KB buffer
+                var bytesCopied = 0L
+                var bytes = inputStream.read(buffer)
+                while (bytes >= 0) {
+                    output.write(buffer, 0, bytes)
+                    bytesCopied += bytes
+                    bytes = inputStream.read(buffer)
+                    // Report progress
+                    val progress = (bytesCopied.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                    onProgress(progress)
+                }
+            }
         }
     }
 

@@ -21,6 +21,8 @@ import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.GraphOptions
 import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
+import java.io.IOException
+import com.google.mediapipe.tasks.core.BaseOptions
 
 /**
  * Main interface for Gemma model operations using MediaPipe LLM Inference API
@@ -55,6 +57,9 @@ class GemmaModelManager private constructor(
     private val _currentConfig = MutableStateFlow<ModelConfig?>(null)
     val currentConfig: StateFlow<ModelConfig?> = _currentConfig.asStateFlow()
 
+    private val _loadProgress = MutableStateFlow(0f)
+    val loadProgress: StateFlow<Float> = _loadProgress.asStateFlow()
+
     // Thread safety
     private val inferenceDebugMutex = Mutex()
 
@@ -72,21 +77,20 @@ class GemmaModelManager private constructor(
     suspend fun initializeModel(config: ModelConfig): InitializationResult =
         withContext(Dispatchers.IO) {
             _modelState.value = ModelState.LOADING
+            _loadProgress.value = 0f
+
             return@withContext try {
                 val initTime = measureTimeMillis {
-                    when (val load = modelLoader.loadModel(config.variant)) {
-                        is ModelLoader.LoadResult.Success -> {
-                            initializeMediaPipeModel(load.modelPath, config)
-                            _currentConfig.value = config
-                            _modelState.value = ModelState.READY
-                        }
-                        is ModelLoader.LoadResult.Error ->
-                            return@withContext InitializationResult.Error(load.message, load.cause)
-                        is ModelLoader.LoadResult.Missing ->  // Add this case
-                            return@withContext InitializationResult.Error(
-                                "Model file not found: ${config.variant.fileName}. Please download the model first.",
-                                null
-                            )
+                    val modelPath = modelLoader.prepareModelFile(config.variant) { progress ->
+                        _loadProgress.value = progress
+                    }
+
+                    if (modelPath != null) {
+                        initializeMediaPipeModel(modelPath, config)
+                        _currentConfig.value = config
+                        _modelState.value = ModelState.READY
+                    } else {
+                        throw IOException("Failed to find or extract model file: ${config.variant.fileName}")
                     }
                 }
                 Log.i(TAG, "Model initialized in $initTime ms")
@@ -94,6 +98,7 @@ class GemmaModelManager private constructor(
                 InitializationResult.Success
             } catch (e: Exception) {
                 _modelState.value = ModelState.ERROR
+                Log.e(TAG, "Model init failed: ${e.message}", e)
                 InitializationResult.Error("Model init failed: ${e.message}", e)
             }
         }
@@ -297,19 +302,33 @@ class GemmaModelManager private constructor(
     private suspend fun initializeMediaPipeModel(modelPath: String, config: ModelConfig) = withContext(Dispatchers.IO) {
         Log.d(TAG, "Initializing MediaPipe LLM Inference with path: $modelPath")
         Log.d(TAG, "Hardware preference: ${config.hardwarePreference}")
+        Log.d(TAG, "Max Tokens set to: ${config.maxOutputTokens}")
 
-        // Configure LLM Inference options
-        val inferenceOptions = LlmInference.LlmInferenceOptions.builder()
+        val optionsBuilder = LlmInference.LlmInferenceOptions.builder()
             .setModelPath(modelPath)
             .setMaxTokens(config.maxOutputTokens)
-            .setMaxTopK(config.topK)
-            .build()
 
-        // Create LLM Inference instance
-        llmInference = LlmInference.createFromOptions(context, inferenceOptions)
+        when (config.hardwarePreference) {
+            HardwarePreference.GPU_PREFERRED -> {
+                Log.d(TAG, "Configuring for GPU acceleration")
+                optionsBuilder.setPreferredBackend(LlmInference.Backend.GPU)
+            }
+            HardwarePreference.CPU_ONLY -> {
+                Log.d(TAG, "Configuring for CPU only")
+                optionsBuilder.setPreferredBackend(LlmInference.Backend.CPU)
+            }
+            HardwarePreference.NNAPI -> {
+                Log.d(TAG, "NNAPI requested, but not supported by LLM Inference API. Using CPU.")
+                optionsBuilder.setPreferredBackend(LlmInference.Backend.CPU)
+            }
+            HardwarePreference.AUTO -> {
+                Log.d(TAG, "Using automatic hardware selection (default)")
+                // Don't set backend, let MediaPipe decide
+            }
+        }
 
-        Log.i(TAG, "MediaPipe LLM Inference initialized successfully")
-        Log.i(TAG, "Hardware acceleration will be automatically optimized by MediaPipe")
+        llmInference = LlmInference.createFromOptions(context, optionsBuilder.build())
+        Log.i(TAG, "MediaPipe LLM Inference engine initialized successfully with ${config.hardwarePreference}")
     }
 
     /**
@@ -319,13 +338,13 @@ class GemmaModelManager private constructor(
         val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
             .apply {
                 config?.let {
+                    Log.d(TAG, "Applying session params: Temp=${it.temperature}, TopK=${it.topK}, TopP=${it.topP}")
                     setTemperature(it.temperature)
                     setTopK(it.topK)
                     setTopP(it.topP)
                 }
             }
             .build()
-
         return LlmInferenceSession.createFromOptions(llmInference!!, sessionOptions)
     }
 

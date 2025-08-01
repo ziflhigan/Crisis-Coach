@@ -10,8 +10,8 @@ data class ModelConfig(
     val variant: ModelVariant,
     val hardwarePreference: HardwarePreference,
     val modelPath: String,
-    val maxOutputTokens: Int = 512,
-    val temperature: Float = 0.7f,
+    val maxOutputTokens: Int = 4096,
+    val temperature: Float = 1.0f,
     val topK: Int = 64,
     val topP: Float = 0.95f
 ) {
@@ -65,7 +65,7 @@ enum class ModelVariant(
     GEMMA_3N_E2B(
         displayName = "Gemma 3n E2B (Standard)",
         effectiveParams = "2B",
-        approximateRamUsageMB = 2048,
+        approximateRamUsageMB = 3072,
         fileName = "gemma-3n-E2B-it-int4.task",
         huggingFaceRepo = "google/gemma-3n-E2B-it-litert-preview",
         downloadFileName = "gemma-3n-E2B-it-int4.task"
@@ -73,7 +73,7 @@ enum class ModelVariant(
     GEMMA_3N_E4B(
         displayName = "Gemma 3n E4B (High Quality)",
         effectiveParams = "4B",
-        approximateRamUsageMB = 3072,
+        approximateRamUsageMB = 4096,
         fileName = "gemma-3n-E4B-it-int4.task",
         huggingFaceRepo = "google/gemma-3n-E4B-it-litert-preview",
         downloadFileName = "gemma-3n-E4B-it-int4.task"
@@ -96,16 +96,16 @@ enum class HardwarePreference(
         description = "Automatically select best available hardware"
     ),
     GPU_PREFERRED(
-        displayName = "GPU Preferred",
-        description = "Prefer GPU acceleration when available"
+        displayName = "GPU",
+        description = "Use GPU acceleration for faster inference"
     ),
     CPU_ONLY(
-        displayName = "CPU Only",
-        description = "Force CPU-only execution"
+        displayName = "CPU",
+        description = "Use CPU only (more compatible, uses less battery)"
     ),
     NNAPI(
-        displayName = "NNAPI",
-        description = "Use Android Neural Networks API"
+        displayName = "NNAPI (Not Supported)",
+        description = "Android Neural Networks API - not available for LLM tasks"
     )
 }
 
@@ -153,7 +153,7 @@ data class ModelPerformanceMetrics(
  * Generation parameters for model inference
  */
 data class GenerationParams(
-    val temperature: Float = 0.7f,
+    val temperature: Float = 1.0f,
     val topK: Int = 64,
     val topP: Float = 0.95f,
     val maxOutputTokens: Int = 512
