@@ -140,6 +140,12 @@ object DeviceCapabilityChecker {
         return capability
     }
 
+    fun isSupported(context: Context, pref: HardwarePreference): Boolean = when (pref) {
+        HardwarePreference.GPU_PREFERRED -> checkGpuAcceleration(context)
+        HardwarePreference.NNAPI        -> checkNeuralProcessingSupport(context)
+        else                            -> true
+    }
+
     /**
      * Gets basic device information
      */
@@ -180,7 +186,7 @@ object DeviceCapabilityChecker {
     /**
      * Gets available RAM in MB
      */
-    private fun getAvailableRamMB(context: Context): Long {
+    fun getAvailableRamMB(context: Context): Long {
         return try {
             val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val memoryInfo = ActivityManager.MemoryInfo()
@@ -195,7 +201,7 @@ object DeviceCapabilityChecker {
     /**
      * Gets total RAM in MB
      */
-    private fun getTotalRamMB(context: Context): Long {
+    fun getTotalRamMB(context: Context): Long {
         return try {
             val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val memoryInfo = ActivityManager.MemoryInfo()
