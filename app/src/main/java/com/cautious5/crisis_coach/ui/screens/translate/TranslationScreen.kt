@@ -1,25 +1,23 @@
 package com.cautious5.crisis_coach.ui.screens.translate
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -27,22 +25,17 @@ import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -52,42 +45,29 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.tooling.preview.PreviewParameter
-import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cautious5.crisis_coach.model.services.TranslationLanguage
-import com.cautious5.crisis_coach.ui.components.VoiceInputButton
-import com.cautious5.crisis_coach.ui.theme.CrisisCoachTheme
-import com.cautious5.crisis_coach.ui.theme.EmergencyTextStyles
-import com.cautious5.crisis_coach.ui.theme.highConfidence
-import com.cautious5.crisis_coach.ui.theme.lowConfidence
-import com.cautious5.crisis_coach.ui.theme.mediumConfidence
-import com.cautious5.crisis_coach.ui.theme.playButton
-import com.cautious5.crisis_coach.ui.theme.sourceLanguage
-import com.cautious5.crisis_coach.ui.theme.targetLanguage
-import com.cautious5.crisis_coach.ui.theme.translationSurface
+import com.cautious5.crisis_coach.ui.components.CardActionButton
+import com.cautious5.crisis_coach.ui.components.CenteredVoiceInput
+import com.cautious5.crisis_coach.ui.components.EmptyState
+import com.cautious5.crisis_coach.ui.components.ErrorCard
+import com.cautious5.crisis_coach.ui.components.ResultCard
+import com.cautious5.crisis_coach.ui.components.SectionHeader
+import com.cautious5.crisis_coach.ui.components.SuccessCard
 import com.cautious5.crisis_coach.utils.LocalPermissionManager
 
 /**
- * Translation screen for Crisis Coach app
- * Provides voice and text translation with pronunciation guides
+ * Modernized Translation screen for Crisis Coach.
+ * Focuses on a clean, intuitive, and action-oriented UI.
  */
-
 @Composable
 fun TranslateScreen(
     viewModel: TranslateViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val scrollState = rememberScrollState()
-
-    // Permission handling
     val permissionManager = LocalPermissionManager.current
 
     TranslateScreenContent(
@@ -108,8 +88,7 @@ fun TranslateScreen(
         onPlayTranslation = viewModel::playTranslation,
         onTogglePronunciationGuide = viewModel::togglePronunciationGuide,
         onClearError = viewModel::clearError,
-        onClearTranslation = viewModel::clearTranslation,
-        canUseMicrophone = viewModel.languageSupportsSpeech(uiState.sourceLanguage)
+        onClearTranslation = viewModel::clearTranslation
     )
 }
 
@@ -126,8 +105,7 @@ private fun TranslateScreenContent(
     onPlayTranslation: () -> Unit,
     onTogglePronunciationGuide: () -> Unit,
     onClearError: () -> Unit,
-    onClearTranslation: () -> Unit,
-    canUseMicrophone: Boolean
+    onClearTranslation: () -> Unit
 ) {
     val scrollState = rememberScrollState()
 
@@ -136,12 +114,9 @@ private fun TranslateScreenContent(
             .fillMaxSize()
             .verticalScroll(scrollState)
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
-        // Header
-        TranslateHeader()
-
-        // Language Selectors
+        // Language Selection
         LanguageSelectionSection(
             sourceLanguage = uiState.sourceLanguage,
             targetLanguage = uiState.targetLanguage,
@@ -151,77 +126,37 @@ private fun TranslateScreenContent(
             onSwapLanguages = onSwapLanguages
         )
 
+        // Output / Result
+        OutputSection(
+            uiState = uiState,
+            onPlayTranslation = onPlayTranslation,
+            onTogglePronunciationGuide = onTogglePronunciationGuide,
+            onClearError = onClearError
+        )
+
         // Input Section
         InputSection(
-            inputText = uiState.inputText,
+            uiState = uiState,
             onInputTextChanged = onInputTextChanged,
-            isListening = uiState.isListening,
-            isTranslating = uiState.isTranslating,
             onStartVoiceInput = onStartVoiceInput,
             onStopVoiceInput = onStopVoiceInput,
-            canUseMicrophone = canUseMicrophone,
             onTranslateClicked = onTranslateClicked
         )
 
-        // Output Section - Only show if there's content or error
-        if (uiState.outputText.isNotBlank() || uiState.error != null) {
-            OutputSection(
-                outputText = uiState.outputText,
-                pronunciationGuide = uiState.pronunciationGuide,
-                showPronunciationGuide = uiState.showPronunciationGuide,
-                canPlayTranslation = uiState.canPlayTranslation,
-                isSpeaking = uiState.isSpeaking,
-                confidence = uiState.confidence,
-                error = uiState.error,
-                onPlayTranslation = onPlayTranslation,
-                onTogglePronunciationGuide = onTogglePronunciationGuide,
-                onClearError = onClearError,
-                isTTSReady = uiState.isTTSReady
-            )
-        }
-
-        // Action Buttons
-        ActionButtonsSection(
-            onClearTranslation = onClearTranslation,
-            hasContent = uiState.inputText.isNotBlank() || uiState.outputText.isNotBlank()
-        )
-    }
-}
-
-@Composable
-private fun TranslateHeader() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.translationSurface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        // Clear All Button
+        AnimatedVisibility(
+            visible = uiState.inputText.isNotBlank() || uiState.outputText.isNotBlank(),
+            enter = fadeIn(),
+            exit = fadeOut()
         ) {
-            Icon(
-                imageVector = Icons.Default.Translate,
-                contentDescription = "Translation",
-                modifier = Modifier.size(32.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-
-            Text(
-                text = "Live Translation",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Bold
-            )
-
-            Text(
-                text = "Voice and text translation for emergency communication",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
+            OutlinedButton(
+                onClick = onClearTranslation,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Clear Session")
+            }
         }
     }
 }
@@ -235,69 +170,40 @@ private fun LanguageSelectionSection(
     onTargetLanguageChanged: (String) -> Unit,
     onSwapLanguages: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        SectionHeader(title = "Select Languages")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Languages",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.SemiBold
+            LanguageDropdown(
+                modifier = Modifier.weight(1f),
+                selectedLanguage = sourceLanguage,
+                availableLanguages = availableLanguages,
+                onLanguageSelected = onSourceLanguageChanged,
+                label = "From"
             )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+            IconButton(
+                onClick = onSwapLanguages,
+                modifier = Modifier.size(48.dp),
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
             ) {
-                // Source Language Dropdown
-                LanguageDropdown(
-                    modifier = Modifier.weight(1f),
-                    selectedLanguage = sourceLanguage,
-                    availableLanguages = availableLanguages,
-                    onLanguageSelected = onSourceLanguageChanged,
-                    label = "From",
-                    color = MaterialTheme.colorScheme.sourceLanguage
-                )
-
-                // Swap Button
-                SwapLanguagesButton(onClick = onSwapLanguages)
-
-                // Target Language Dropdown
-                LanguageDropdown(
-                    modifier = Modifier.weight(1f),
-                    selectedLanguage = targetLanguage,
-                    availableLanguages = availableLanguages,
-                    onLanguageSelected = onTargetLanguageChanged,
-                    label = "To",
-                    color = MaterialTheme.colorScheme.targetLanguage
-                )
+                Icon(Icons.Default.SwapHoriz, "Swap languages")
             }
-        }
-    }
-}
 
-@Composable
-private fun SwapLanguagesButton(onClick: () -> Unit) {
-    IconButton(
-        onClick = onClick,
-        modifier = Modifier
-            .size(48.dp)
-            .background(
-                MaterialTheme.colorScheme.primaryContainer,
-                RoundedCornerShape(12.dp)
+            LanguageDropdown(
+                modifier = Modifier.weight(1f),
+                selectedLanguage = targetLanguage,
+                availableLanguages = availableLanguages,
+                onLanguageSelected = onTargetLanguageChanged,
+                label = "To"
             )
-    ) {
-        Icon(
-            imageVector = Icons.Default.SwapHoriz,
-            contentDescription = "Swap languages",
-            tint = MaterialTheme.colorScheme.onPrimaryContainer
-        )
+        }
     }
 }
 
@@ -309,7 +215,6 @@ private fun LanguageDropdown(
     availableLanguages: List<TranslationLanguage>,
     onLanguageSelected: (String) -> Unit,
     label: String,
-    color: Color
 ) {
     var expanded by remember { mutableStateOf(false) }
     val selectedLanguageInfo = availableLanguages.find { it.code == selectedLanguage }
@@ -328,10 +233,7 @@ private fun LanguageDropdown(
             onValueChange = {},
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = color,
-                focusedLabelColor = color
-            )
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
         )
 
         ExposedDropdownMenu(
@@ -340,34 +242,13 @@ private fun LanguageDropdown(
         ) {
             availableLanguages.forEach { language ->
                 DropdownMenuItem(
-                    text = {
-                        Column {
-                            Text(
-                                text = language.displayName,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            if (!language.supportsSpeech) {
-                                Text(
-                                    text = "Text only",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    },
+                    text = { Text(language.displayName) },
                     onClick = {
                         onLanguageSelected(language.code)
                         expanded = false
                     },
                     leadingIcon = if (language.supportsSpeech) {
-                        {
-                            Icon(
-                                imageVector = Icons.Default.Mic,
-                                contentDescription = "Supports speech",
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                        { Icon(Icons.Default.Mic, "Supports speech", tint = MaterialTheme.colorScheme.primary) }
                     } else null
                 )
             }
@@ -376,530 +257,187 @@ private fun LanguageDropdown(
 }
 
 @Composable
-private fun InputSection(
-    inputText: String,
-    onInputTextChanged: (String) -> Unit,
-    isListening: Boolean,
-    isTranslating: Boolean,
-    onStartVoiceInput: () -> Unit,
-    onStopVoiceInput: () -> Unit,
-    canUseMicrophone: Boolean,
-    onTranslateClicked: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text(
-                text = "Input",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.SemiBold
-            )
-
-            // Voice Input Section
-            VoiceInputSection(
-                isListening = isListening,
-                canUseMicrophone = canUseMicrophone,
-                onStartVoiceInput = onStartVoiceInput,
-                onStopVoiceInput = onStopVoiceInput
-            )
-
-            // Text Input Field
-            OutlinedTextField(
-                value = inputText,
-                onValueChange = onInputTextChanged,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Or type here...") },
-                placeholder = { Text("Enter text to translate") },
-                minLines = 3,
-                maxLines = 5,
-                textStyle = EmergencyTextStyles.InputText
-            )
-
-            // Translate Button with integrated status
-            TranslateButton(
-                onClick = onTranslateClicked,
-                enabled = inputText.isNotBlank() && !isTranslating,
-                isTranslating = isTranslating
-            )
-        }
-    }
-}
-
-@Composable
-private fun VoiceInputSection(
-    isListening: Boolean,
-    canUseMicrophone: Boolean,
-    onStartVoiceInput: () -> Unit,
-    onStopVoiceInput: () -> Unit
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        VoiceInputButton(
-            isListening = isListening,
-            onStartListening = onStartVoiceInput,
-            onStopListening = onStopVoiceInput,
-            enabled = canUseMicrophone,
-            modifier = Modifier.size(64.dp)
-        )
-
-        if (!canUseMicrophone) {
-            Text(
-                text = "Voice input not supported for this language",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-        } else if (isListening) {
-            Text(
-                text = "Listening... Speak now",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = TextAlign.Center,
-                fontWeight = FontWeight.Medium
-            )
-        }
-    }
-}
-
-@Composable
-private fun TranslateButton(
-    onClick: () -> Unit,
-    enabled: Boolean,
-    isTranslating: Boolean
-) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primary
-        )
-    ) {
-        if (isTranslating) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
-                strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.onPrimary
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Translating...")
-        } else {
-            Icon(
-                imageVector = Icons.Default.Translate,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Translate")
-        }
-    }
-}
-
-@Composable
 private fun OutputSection(
-    outputText: String,
-    pronunciationGuide: String?,
-    showPronunciationGuide: Boolean,
-    canPlayTranslation: Boolean,
-    isSpeaking: Boolean,
-    confidence: Float,
-    error: String?,
+    uiState: TranslateViewModel.TranslateUiState,
     onPlayTranslation: () -> Unit,
     onTogglePronunciationGuide: () -> Unit,
-    onClearError: () -> Unit,
-    isTTSReady: Boolean
+    onClearError: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Header with confidence
-            OutputHeader(confidence = confidence)
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        SectionHeader(title = "Result")
 
-            if (error != null) {
-                ErrorCard(
-                    error = error,
-                    onDismiss = onClearError
+        if (!uiState.error.isNullOrBlank()) {
+            // Corrected ErrorCard implementation
+            ErrorCard(title = "Translation Error") {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalAlignment = Alignment.Start
+                ) {
+                    Text(
+                        text = uiState.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        CardActionButton(text = "Dismiss", onClick = onClearError)
+                    }
+                }
+            }
+        } else if (uiState.outputText.isNotBlank()) {
+            SuccessCard(title = "Translation") {
+                Text(
+                    text = uiState.outputText,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Normal,
+                    modifier = Modifier.fillMaxWidth()
                 )
-            } else {
-                // Translation Output
-                TranslationOutput(
-                    outputText = outputText,
-                    pronunciationGuide = pronunciationGuide,
-                    showPronunciationGuide = showPronunciationGuide,
-                    canPlayTranslation = canPlayTranslation,
-                    isSpeaking = isSpeaking,
+
+                AnimatedVisibility(
+                    visible = uiState.showPronunciationGuide && !uiState.pronunciationGuide.isNullOrBlank(),
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    PronunciationGuide(guide = uiState.pronunciationGuide ?: "")
+                }
+
+                ResultActions(
+                    uiState = uiState,
                     onPlayTranslation = onPlayTranslation,
-                    onTogglePronunciationGuide = onTogglePronunciationGuide,
-                    isTTSReady = isTTSReady
+                    onTogglePronunciationGuide = onTogglePronunciationGuide
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun OutputHeader(confidence: Float) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "Translation",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            fontWeight = FontWeight.SemiBold
-        )
-
-        if (confidence > 0f) {
-            ConfidenceBadge(confidence = confidence)
-        }
-    }
-}
-
-@Composable
-private fun TranslationOutput(
-    outputText: String,
-    pronunciationGuide: String?,
-    showPronunciationGuide: Boolean,
-    canPlayTranslation: Boolean,
-    isSpeaking: Boolean,
-    onPlayTranslation: () -> Unit,
-    onTogglePronunciationGuide: () -> Unit,
-    isTTSReady: Boolean
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Main translation text
-            Text(
-                text = outputText,
-                style = EmergencyTextStyles.TranslationText,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            // Pronunciation Guide
-            if (showPronunciationGuide && !pronunciationGuide.isNullOrBlank()) {
-                HorizontalDivider()
-                PronunciationGuide(pronunciationGuide = pronunciationGuide)
-            }
-
-            // Action Buttons
-            TranslationActions(
-                canPlayTranslation = canPlayTranslation,
-                isSpeaking = isSpeaking,
-                showPronunciationGuide = showPronunciationGuide,
-                onPlayTranslation = onPlayTranslation,
-                onTogglePronunciationGuide = onTogglePronunciationGuide,
-                isTTSReady = isTTSReady
+        } else {
+            EmptyState(
+                icon = Icons.Default.Info,
+                title = "Awaiting Input",
+                subtitle = "Use voice or text input below to start translating. The result will appear here."
             )
         }
     }
 }
 
+
 @Composable
-private fun PronunciationGuide(pronunciationGuide: String) {
-    Column(
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+private fun PronunciationGuide(guide: String) {
+    ResultCard(
+        title = "Pronunciation Guide",
+        modifier = Modifier.fillMaxWidth(),
+        surfaceTint = MaterialTheme.colorScheme.surfaceVariant
     ) {
         Text(
-            text = "Pronunciation Guide:",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = FontWeight.SemiBold
-        )
-        Text(
-            text = pronunciationGuide,
-            style = EmergencyTextStyles.PronunciationGuide,
+            text = guide,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
 
 @Composable
-private fun TranslationActions(
-    canPlayTranslation: Boolean,
-    isSpeaking: Boolean,
-    showPronunciationGuide: Boolean,
+private fun ResultActions(
+    uiState: TranslateViewModel.TranslateUiState,
     onPlayTranslation: () -> Unit,
-    onTogglePronunciationGuide: () -> Unit,
-    isTTSReady: Boolean = true
+    onTogglePronunciationGuide: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.End
     ) {
-        // Play Translation Button
-        if (canPlayTranslation) {
-            Button(
+        if (uiState.canPlayTranslation) {
+            TextButton(
                 onClick = onPlayTranslation,
-                enabled = !isSpeaking && isTTSReady,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.playButton
-                )
+                enabled = !uiState.isSpeaking && uiState.isTTSReady
             ) {
                 Icon(
-                    imageVector = if (isSpeaking) Icons.AutoMirrored.Filled.VolumeUp else Icons.Default.PlayArrow,
+                    if (uiState.isSpeaking) Icons.AutoMirrored.Filled.VolumeUp else Icons.Default.PlayArrow,
                     contentDescription = "Play translation",
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(18.dp)
                 )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(if (isSpeaking) "Playing" else "Play")
+                Spacer(Modifier.width(8.dp))
+                Text(if (uiState.isSpeaking) "Playing" else "Play")
             }
         }
 
-        // Toggle Pronunciation Guide
-        TextButton(
-            onClick = onTogglePronunciationGuide
-        ) {
-            Icon(
-                imageVector = if (showPronunciationGuide) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                contentDescription = "Toggle pronunciation guide",
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(if (showPronunciationGuide) "Hide Guide" else "Show Guide")
-        }
-    }
-}
-
-@Composable
-private fun ConfidenceBadge(confidence: Float) {
-    val color = when {
-        confidence >= 0.8f -> MaterialTheme.colorScheme.highConfidence
-        confidence >= 0.6f -> MaterialTheme.colorScheme.mediumConfidence
-        else -> MaterialTheme.colorScheme.lowConfidence
-    }
-
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = color.copy(alpha = 0.2f),
-        border = BorderStroke(1.dp, color)
-    ) {
-        Text(
-            text = "${(confidence * 100).toInt()}%",
-            style = MaterialTheme.typography.labelSmall,
-            color = color,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-        )
-    }
-}
-
-@Composable
-private fun ErrorCard(
-    error: String,
-    onDismiss: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Error,
-                contentDescription = "Error",
-                tint = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.size(24.dp)
-            )
-
-            Text(
-                text = error,
-                style = EmergencyTextStyles.ErrorText,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.weight(1f)
-            )
-
-            IconButton(onClick = onDismiss) {
+        if (!uiState.pronunciationGuide.isNullOrBlank()) {
+            TextButton(onClick = onTogglePronunciationGuide) {
                 Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Dismiss error",
-                    tint = MaterialTheme.colorScheme.onErrorContainer
+                    if (uiState.showPronunciationGuide) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    contentDescription = "Toggle pronunciation guide",
+                    modifier = Modifier.size(18.dp)
                 )
+                Spacer(Modifier.width(8.dp))
+                Text(if (uiState.showPronunciationGuide) "Hide Guide" else "Show Guide")
             }
         }
     }
 }
 
 @Composable
-private fun ActionButtonsSection(
-    onClearTranslation: () -> Unit,
-    hasContent: Boolean
+private fun InputSection(
+    uiState: TranslateViewModel.TranslateUiState,
+    onInputTextChanged: (String) -> Unit,
+    onStartVoiceInput: () -> Unit,
+    onStopVoiceInput: () -> Unit,
+    onTranslateClicked: () -> Unit
 ) {
-    if (hasContent) {
-        OutlinedButton(
-            onClick = onClearTranslation,
+    val canUseMicrophone = remember(uiState.sourceLanguage, uiState.availableLanguages) {
+        uiState.availableLanguages.find { it.code == uiState.sourceLanguage }?.supportsSpeech ?: false
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        SectionHeader("Input")
+
+        // Voice Input
+        CenteredVoiceInput(
+            isListening = uiState.isListening,
+            onStartListening = onStartVoiceInput,
+            onStopListening = onStopVoiceInput,
+            enabled = canUseMicrophone
+        )
+
+        Text(
+            text = "OR",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        // Text Input
+        OutlinedTextField(
+            value = uiState.inputText,
+            onValueChange = onInputTextChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Type text to translate") },
+            minLines = 3,
+            maxLines = 5,
+            enabled = !uiState.isListening
+        )
+
+        // Translate Button for text input
+        Button(
+            onClick = onTranslateClicked,
+            enabled = uiState.inputText.isNotBlank() && !uiState.isTranslating && !uiState.isListening,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Icon(
-                imageVector = Icons.Default.Clear,
-                contentDescription = "Clear",
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Clear All")
-        }
-    }
-}
-
-// Preview Parameter Provider for cleaner previews
-class TranslateUiStateProvider : PreviewParameterProvider<TranslateViewModel.TranslateUiState> {
-    override val values = sequenceOf(
-        // Basic state
-        TranslateViewModel.TranslateUiState(
-            sourceLanguage = "en",
-            targetLanguage = "ar",
-            availableLanguages = getSampleLanguages()
-        ),
-        // With translation
-        TranslateViewModel.TranslateUiState(
-            sourceLanguage = "en",
-            targetLanguage = "ar",
-            inputText = "I need help",
-            outputText = "أحتاج مساعدة",
-            pronunciationGuide = "[ana ahtaju musaeda]",
-            confidence = 0.95f,
-            availableLanguages = getSampleLanguages()
-        ),
-        // Error state
-        TranslateViewModel.TranslateUiState(
-            sourceLanguage = "en",
-            targetLanguage = "ar",
-            inputText = "Help me",
-            error = "Translation failed. Please try again.",
-            availableLanguages = getSampleLanguages()
-        ),
-        // Listening state
-        TranslateViewModel.TranslateUiState(
-            sourceLanguage = "en",
-            targetLanguage = "fr",
-            isListening = true,
-            availableLanguages = getSampleLanguages()
-        )
-    )
-
-    private fun getSampleLanguages() = listOf(
-        TranslationLanguage(
-            "en", "English", true,
-            supportsSpeech = true
-        ),
-        TranslationLanguage(
-            "ar", "Arabic", true,
-            supportsSpeech = true
-        ),
-        TranslationLanguage(
-            "fr", "French", true,
-            supportsSpeech = true
-        ),
-        TranslationLanguage(
-            "es", "Spanish", true,
-            supportsSpeech = true
-        ),
-        TranslationLanguage(
-            "de", "German", false,
-            supportsSpeech = true
-        )
-    )
-}
-
-@Preview(
-    name = "Translation Screen",
-    apiLevel = 34,
-    showBackground = true
-)
-@Composable
-private fun TranslateScreenPreview(
-    @PreviewParameter(TranslateUiStateProvider::class) uiState: TranslateViewModel.TranslateUiState
-) {
-    CrisisCoachTheme {
-        Surface {
-            TranslateScreenContent(
-                uiState = uiState,
-                onInputTextChanged = {},
-                onSourceLanguageChanged = {},
-                onTargetLanguageChanged = {},
-                onSwapLanguages = {},
-                onStartVoiceInput = {},
-                onStopVoiceInput = {},
-                onTranslateClicked = {},
-                onPlayTranslation = {},
-                onTogglePronunciationGuide = {},
-                onClearError = {},
-                onClearTranslation = {},
-                canUseMicrophone = true
-            )
-        }
-    }
-}
-
-@Preview(
-    name = "Translation Screen - Dark",
-    apiLevel = 34,
-    showBackground = true
-)
-@Composable
-private fun TranslateScreenDarkPreview() {
-    CrisisCoachTheme(darkTheme = true) {
-        Surface {
-            TranslateScreenContent(
-                uiState = TranslateViewModel.TranslateUiState(
-                    sourceLanguage = "en",
-                    targetLanguage = "es",
-                    inputText = "Where is the hospital?",
-                    outputText = "¿Dónde está el hospital?",
-                    availableLanguages = listOf(
-                        TranslationLanguage(
-                            "en", "English", true,
-                            supportsSpeech = true
-                        ),
-                        TranslationLanguage(
-                            "es", "Spanish", true,
-                            supportsSpeech = true
-                        )
-                    )
-                ),
-                onInputTextChanged = {},
-                onSourceLanguageChanged = {},
-                onTargetLanguageChanged = {},
-                onSwapLanguages = {},
-                onStartVoiceInput = {},
-                onStopVoiceInput = {},
-                onTranslateClicked = {},
-                onPlayTranslation = {},
-                onTogglePronunciationGuide = {},
-                onClearError = {},
-                onClearTranslation = {},
-                canUseMicrophone = true
-            )
+            if (uiState.isTranslating) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    strokeWidth = 2.dp
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Translating...")
+            } else {
+                Icon(Icons.Default.Translate, contentDescription = null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Translate Text")
+            }
         }
     }
 }
