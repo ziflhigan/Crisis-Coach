@@ -138,11 +138,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.d(TAG, "Step 3: Initializing knowledge base...")
                 val dbInitializer = DatabaseInitializer(getApplication(), app.knowledgeBase, app.textEmbedder)
                 when (val dbResult = dbInitializer.initializeIfNeeded()) {
+                    is DbInitResult.Success -> {
+                        Log.i(TAG, "Database initialized with ${dbResult.entriesAdded} entries from ${dbResult.sourcesProcessed} sources in ${dbResult.initializationTimeMs}ms")
+                    }
+                    is DbInitResult.AlreadyInitialized -> {
+                        Log.i(TAG, "Database was already initialized")
+                    }
                     is DbInitResult.Error -> {
+                        Log.e(TAG, "Database initialization failed: ${dbResult.message}")
                         setInitializationError("Database Failed", dbResult.message)
                         return@launch
                     }
-                    else -> Log.i(TAG, "Database is ready.")
+                }
+
+                // Debug: Check what's actually in the database
+                viewModelScope.launch(Dispatchers.IO) {
+                    app.knowledgeBase.debugDatabaseContent()
                 }
 
                 // Step 4: Check if model exists BEFORE trying to initialize it
