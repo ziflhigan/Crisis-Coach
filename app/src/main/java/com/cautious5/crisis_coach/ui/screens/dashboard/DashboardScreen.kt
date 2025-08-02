@@ -9,6 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -337,7 +338,7 @@ private fun QuickActionsSection(
                     modifier = Modifier.fillMaxWidth(),
                     title = "Emergency Guide",
                     subtitle = "Search emergency protocols and first aid procedures",
-                    icon = Icons.Default.MenuBook,
+                    icon = Icons.AutoMirrored.Filled.MenuBook,
                     onClick = onKnowledgeClick,
                     enabled = isModelReady,
                     containerColor = MaterialTheme.colorScheme.tertiary,
