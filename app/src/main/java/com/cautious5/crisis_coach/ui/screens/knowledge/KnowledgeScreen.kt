@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
@@ -38,7 +40,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -82,7 +86,9 @@ fun KnowledgeScreen(
         onCategorySelected = viewModel::selectCategory,
         availableCategories = viewModel.getAvailableCategories(),
         onQuerySelected = viewModel::useSuggestedQuery,
-        onClearError = viewModel::clearError
+        onClearError = viewModel::clearError,
+        onTriggerSearch = viewModel::triggerSearch,
+        onCancelSearch = viewModel::cancelSearchAndReset
     )
 }
 
@@ -96,7 +102,9 @@ private fun KnowledgeScreenContent(
     onCategorySelected: (String?) -> Unit,
     availableCategories: List<Pair<String?, String>>,
     onQuerySelected: (String) -> Unit,
-    onClearError: () -> Unit
+    onClearError: () -> Unit,
+    onTriggerSearch: (String) -> Unit,
+    onCancelSearch: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -107,12 +115,13 @@ private fun KnowledgeScreenContent(
     ) {
         // Search Input Section
         SearchInputSection(
-            query = uiState.query,
-            isListening = uiState.isListening,
+            uiState = uiState,
             onQueryChanged = onQueryChanged,
             onStartVoiceInput = onStartVoiceInput,
             onStopVoiceInput = onStopVoiceInput,
-            onClearQuery = onClearQuery
+            onClearQuery = onClearQuery,
+            onTriggerSearch = onTriggerSearch,
+            onCancelSearch = onCancelSearch
         )
 
         // Category Filters
@@ -128,7 +137,7 @@ private fun KnowledgeScreenContent(
             label = "knowledge_content_animation"
         ) { state ->
             when {
-                state.isSearching || state.isGeneratingAnswer -> {
+                state.isBusy -> {
                     LoadingIndicator(
                         message = if (state.isGeneratingAnswer) "Generating answer..." else "Searching knowledge base..."
                     )
@@ -174,35 +183,52 @@ private fun KnowledgeScreenContent(
 
 @Composable
 private fun SearchInputSection(
-    query: String,
-    isListening: Boolean,
+    uiState: KnowledgeViewModel.KnowledgeUiState,
     onQueryChanged: (String) -> Unit,
     onStartVoiceInput: () -> Unit,
     onStopVoiceInput: () -> Unit,
-    onClearQuery: () -> Unit
+    onClearQuery: () -> Unit,
+    onTriggerSearch: (String) -> Unit,
+    onCancelSearch: () -> Unit
 ) {
+    val keyboardController = LocalSoftwareKeyboardController.current
+
     OutlinedTextField(
-        value = query,
+        value = uiState.query,
         onValueChange = onQueryChanged,
         modifier = Modifier.fillMaxWidth(),
         label = { Text("Ask a question or search...") },
         placeholder = { Text("e.g., How to splint a fracture?") },
         leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(
+            onSearch = {
+                onTriggerSearch(uiState.query)
+                keyboardController?.hide()
+            }
+        ),
         trailingIcon = {
-            Row {
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = onClearQuery) {
-                        Icon(Icons.Default.Close, contentDescription = "Clear query")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (uiState.isBusy) {
+                    IconButton(onClick = onCancelSearch) {
+                        Icon(Icons.Default.Close, contentDescription = "Cancel search", tint = SemanticColors.Error)
                     }
+                } else {
+                    if (uiState.query.isNotEmpty()) {
+                        IconButton(onClick = onClearQuery) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear query")
+                        }
+                    }
+                    CompactVoiceButton(
+                        isListening = uiState.isListening,
+                        onStartListening = onStartVoiceInput,
+                        onStopListening = onStopVoiceInput
+                    )
                 }
-                CompactVoiceButton(
-                    isListening = isListening,
-                    onStartListening = onStartVoiceInput,
-                    onStopListening = onStopVoiceInput
-                )
             }
         },
-        singleLine = true
+        singleLine = true,
+        enabled = !uiState.isBusy
     )
 }
 

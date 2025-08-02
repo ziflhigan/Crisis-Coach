@@ -65,7 +65,13 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
         val sourcesUsed: List<String> = emptyList(),
         val showVoiceInput: Boolean = false,
         val recognitionState: RecognitionState = RecognitionState.IDLE
-    )
+    ) {
+        /**
+         * Derived property to determine if the screen is in a busy state.
+         */
+        val isBusy: Boolean
+            get() = isSearching || isGeneratingAnswer
+    }
 
     /**
      * Knowledge categories for filtering
@@ -120,20 +126,56 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         _uiState.value = _uiState.value.copy(query = query)
+    }
 
-        // Cancel previous search
-        searchJob?.cancel()
-
+    /**
+     * Explicitly triggers the knowledge base search.
+     */
+    fun triggerSearch(query: String) {
         if (query.length < KNOWLEDGE_QUERY_MIN_LENGTH) {
-            clearResults()
+            setError("Query must be at least $KNOWLEDGE_QUERY_MIN_LENGTH characters long.")
             return
         }
 
-        // Debounce search
+        if (_uiState.value.isSearching || _uiState.value.isGeneratingAnswer) {
+            Log.w(TAG, "Search already in progress.")
+            return
+        }
+
+        // Cancel any pending search job (e.g., if the user was typing then hit search)
+        searchJob?.cancel()
+
         searchJob = viewModelScope.launch {
-            delay(SEARCH_DEBOUNCE_DELAY_MS)
+            // Delay for a very short debounce (optional, but good practice for quick input)
+            delay(100)
             performSearch(query)
         }
+    }
+
+    /**
+     * Stops the ongoing search/generation and resets the UI to idle state.
+     */
+    fun cancelSearchAndReset() {
+        Log.d(TAG, "Cancelling ongoing search/generation and resetting state.")
+
+        // 1. Cancel the search/RAG job
+        searchJob?.cancel()
+        searchJob = null
+
+        // 2. Clear LLM response streams (if applicable, in this flow, they are tied to the job)
+        // If generateText was streaming, it would also stop when the scope is cancelled
+
+        // 3. Reset the UI state
+        _uiState.value = _uiState.value.copy(
+            isSearching = false,
+            isGeneratingAnswer = false,
+            searchResults = emptyList(),
+            ragAnswer = "",
+            error = null,
+            sourcesUsed = emptyList(),
+            confidenceScore = 0f,
+            totalSearchTime = 0
+        )
     }
 
     /**
@@ -174,6 +216,8 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
                             Log.d(TAG, "Voice input received: $spokenText")
                             updateQuery(spokenText)
                             _uiState.value = _uiState.value.copy(showVoiceInput = false)
+                            // Explicitly trigger search after voice input
+                            triggerSearch(spokenText)
                         } else {
                             setError("No speech detected. Please try again.")
                         }
@@ -236,9 +280,10 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
                     Log.d(TAG, "Knowledge search completed in ${searchTime}ms, found ${searchResult.entries.size} results")
 
                     _uiState.value = _uiState.value.copy(
+                        isSearching = false,
                         searchResults = searchResult.entries,
-                        totalSearchTime = searchTime,
-                        isSearching = false
+                        error = null,
+                        totalSearchTime = searchTime
                     )
 
                     // Step 2: Generate RAG answer if we have results
@@ -246,7 +291,8 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
                         generateRAGAnswer(query, searchResult.entries)
                     } else {
                         _uiState.value = _uiState.value.copy(
-                            ragAnswer = "No relevant information found in the emergency database for this query. Please try rephrasing your question or check the suggested queries below."
+                            ragAnswer = "No relevant information found in the emergency database for this query. Please try rephrasing your question or check the suggested queries below.",
+                            isGeneratingAnswer = false
                         )
                     }
                 }
@@ -254,14 +300,17 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
                     Log.d(TAG, "No search results found for: $query")
                     _uiState.value = _uiState.value.copy(
                         isSearching = false,
-                        searchResults = emptyList(),
-                        ragAnswer = "No relevant emergency information found for your query. Try using different keywords or check the suggested questions below."
+                        isGeneratingAnswer = false,
+                        searchResults = emptyList()
                     )
+                    // Still generate an answer using LLM without context
+                    generateFallbackAnswer(query)
                 }
                 is SearchResult.Error -> {
                     Log.e(TAG, "Knowledge search failed: ${searchResult.message}")
                     _uiState.value = _uiState.value.copy(
                         isSearching = false,
+                        isGeneratingAnswer = false,
                         searchResults = emptyList()
                     )
                     setError("Search failed: ${searchResult.message}")
@@ -273,8 +322,51 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
 
         } catch (e: Exception) {
             Log.e(TAG, "Search exception", e)
-            _uiState.value = _uiState.value.copy(isSearching = false)
+            _uiState.value = _uiState.value.copy(
+                isSearching = false,
+                isGeneratingAnswer = false
+            )
             setError("Search error: ${e.message}")
+        }
+    }
+
+    private suspend fun generateFallbackAnswer(query: String) {
+        _uiState.value = _uiState.value.copy(isGeneratingAnswer = true)
+
+        try {
+            val fallbackPrompt = PromptUtils.buildRAGPrompt(
+                question = query,
+                retrievedDocs = emptyList(), // No docs found
+                includeConfidenceNote = true
+            )
+
+            gemmaModelManager.generateText(fallbackPrompt).collect { result ->
+                when (result) {
+                    is GenerationResult.Success -> {
+                        val finalAnswer = PromptUtils.addSafetyDisclaimer(
+                            result.text,
+                            PromptUtils.DisclaimerType.GENERAL
+                        )
+                        _uiState.value = _uiState.value.copy(
+                            ragAnswer = finalAnswer,
+                            confidenceScore = 0.2f, // Low confidence without sources
+                            isGeneratingAnswer = false
+                        )
+                    }
+                    is GenerationResult.Error -> {
+                        _uiState.value = _uiState.value.copy(
+                            ragAnswer = "Unable to generate answer. Please try again.",
+                            isGeneratingAnswer = false
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Fallback answer generation failed", e)
+            _uiState.value = _uiState.value.copy(
+                isGeneratingAnswer = false,
+                error = "Failed to generate answer"
+            )
         }
     }
 
@@ -374,7 +466,7 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
     /**
      * Clear search results and query
      */
-    fun clearResults() {
+    private fun clearResults() {
         Log.d(TAG, "Clearing search results")
         _uiState.value = _uiState.value.copy(
             searchResults = emptyList(),
