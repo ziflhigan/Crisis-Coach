@@ -3,61 +3,21 @@ package com.cautious5.crisis_coach.ui.screens.imagetriage
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowRight
-import androidx.compose.material.icons.automirrored.filled.Help
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Dangerous
-import androidx.compose.material.icons.filled.Engineering
-import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.LocalHospital
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.PriorityHigh
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.automirrored.filled.PlaylistAddCheck
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,110 +27,72 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.tooling.preview.PreviewParameter
-import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.cautious5.crisis_coach.ui.components.ResultCard
-import com.cautious5.crisis_coach.ui.theme.CrisisCoachTheme
-import com.cautious5.crisis_coach.ui.theme.EmergencyColors
-import com.cautious5.crisis_coach.ui.theme.EmergencyTextStyles
-import com.cautious5.crisis_coach.ui.theme.emergencyHigh
-import com.cautious5.crisis_coach.ui.theme.emergencyMedium
-import com.cautious5.crisis_coach.ui.theme.generalSurface
-import com.cautious5.crisis_coach.ui.theme.medicalSurface
-import com.cautious5.crisis_coach.ui.theme.structuralSurface
-import com.cautious5.crisis_coach.ui.theme.warningButton
-import com.cautious5.crisis_coach.ui.theme.warningCardBackground
+import com.cautious5.crisis_coach.ui.components.*
+import com.cautious5.crisis_coach.ui.theme.SemanticColors
+import com.cautious5.crisis_coach.ui.theme.SurfaceTints
 import com.cautious5.crisis_coach.utils.LocalPermissionManager
 import com.cautious5.crisis_coach.utils.ResponseParser
 import java.io.File
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.*
 
 /**
- * Image Triage screen for Crisis Coach app
- * Provides image capture/selection and AI-powered analysis for medical and structural assessment
+ * Modernized Image Triage screen.
+ * Guides user through selecting, analyzing, and reviewing image-based assessments.
  */
-
 @Composable
 fun ImageTriageScreen(
     viewModel: ImageTriageViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-
-    // Permission handling
     val permissionManager = LocalPermissionManager.current
-
-    // Camera URI state
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
 
-    // Image selection launchers
-    val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let { viewModel.loadImageFromUri(it) }
         viewModel.hideImagePicker()
     }
 
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        if (success && cameraImageUri != null) {
-            viewModel.loadImageFromUri(cameraImageUri!!)
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success) {
+            cameraImageUri?.let { viewModel.loadImageFromUri(it) }
         }
-        viewModel.hideCameraCapture()
+        viewModel.hideImagePicker()
     }
 
     fun createCameraImageUri(): Uri {
-        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val imageFileName = "CRISIS_COACH_$timeStamp.jpg"
-        val storageDir = File(context.cacheDir, "images")
-        if (!storageDir.exists()) {
-            storageDir.mkdirs()
-        }
-        val imageFile = File(storageDir, imageFileName)
-
-        return FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            imageFile
-        )
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val imageFile = File(context.cacheDir, "JPEG_${timeStamp}_.jpg")
+        return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", imageFile)
     }
 
     ImageTriageScreenContent(
         uiState = uiState,
         onAnalysisTypeSelected = viewModel::setAnalysisType,
         onSelectImage = {
-            if (permissionManager.hasCameraPermissions() && permissionManager.hasStoragePermissions()) {
-                viewModel.showImagePicker()
-            } else {
+            if (!permissionManager.hasAllRequiredPermissions()) {
                 permissionManager.requestAllPermissions()
+            } else {
+                viewModel.showImagePicker()
             }
         },
         onClearImage = viewModel::clearImage,
         onQuestionChanged = viewModel::updateCustomQuestion,
         onAnalyzeImage = viewModel::analyzeImage,
-        onCancelAnalysis = viewModel::cancelAnalysis,
         onClearError = viewModel::clearError,
         onCameraSelected = {
             cameraImageUri = createCameraImageUri()
             cameraLauncher.launch(cameraImageUri!!)
-            viewModel.hideImagePicker()
         },
         onGallerySelected = {
             galleryLauncher.launch("image/*")
         },
-        onDismissImagePicker = viewModel::hideImagePicker,
-        onGetUrgencyColor = viewModel::getUrgencyColor,
-        onGetSafetyColor = viewModel::getSafetyColor,
-        onGetLevelDisplayText = viewModel::getLevelDisplayText
+        onDismissImagePicker = viewModel::hideImagePicker
     )
 }
 
@@ -182,14 +104,10 @@ private fun ImageTriageScreenContent(
     onClearImage: () -> Unit,
     onQuestionChanged: (String) -> Unit,
     onAnalyzeImage: () -> Unit,
-    onCancelAnalysis: () -> Unit,
     onClearError: () -> Unit,
     onCameraSelected: () -> Unit,
     onGallerySelected: () -> Unit,
-    onDismissImagePicker: () -> Unit,
-    onGetUrgencyColor: (ResponseParser.UrgencyLevel) -> Color,
-    onGetSafetyColor: (ResponseParser.SafetyStatus) -> Color,
-    onGetLevelDisplayText: (Any) -> String
+    onDismissImagePicker: () -> Unit
 ) {
     val scrollState = rememberScrollState()
 
@@ -198,36 +116,29 @@ private fun ImageTriageScreenContent(
             .fillMaxSize()
             .verticalScroll(scrollState)
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
-        // Header
-        ImageTriageHeader()
-
-        // Analysis Type Selector
-        AnalysisTypeSelector(
+        // Step 1: Analysis Type
+        AnalysisTypeSection(
             selectedType = uiState.analysisType,
             onTypeSelected = onAnalysisTypeSelected
         )
 
-        // Image Input Section
+        // Step 2: Image Input
         ImageInputSection(
             selectedImage = uiState.selectedImage,
-            hasImage = uiState.hasImage,
-            isAnalyzing = uiState.isAnalyzing,
             onSelectImage = onSelectImage,
             onClearImage = onClearImage
         )
 
-        // Custom Question Input - Only show if image is selected
-        if (uiState.hasImage) {
-            CustomQuestionSection(
-                question = uiState.customQuestion,
-                onQuestionChanged = onQuestionChanged,
-                analysisType = uiState.analysisType
-            )
-
-            // Analysis Button
-            if (!uiState.isAnalyzing) {
+        // Step 3: Optional Question & Analyze Button
+        AnimatedVisibility(visible = uiState.hasImage && !uiState.isAnalyzing) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                CustomQuestionSection(
+                    question = uiState.customQuestion,
+                    onQuestionChanged = onQuestionChanged,
+                    analysisType = uiState.analysisType
+                )
                 AnalyzeButton(
                     onClick = onAnalyzeImage,
                     analysisType = uiState.analysisType
@@ -235,39 +146,30 @@ private fun ImageTriageScreenContent(
             }
         }
 
-        // Analysis Progress
+        // Analysis Progress / Results
         if (uiState.isAnalyzing) {
-            AnalysisProgressCard(
-                analysisType = uiState.analysisType,
-                progress = uiState.analysisProgress,
-                onCancel = onCancelAnalysis
-            )
-        }
-
-        // Analysis Results
-        uiState.analysisResult?.let { result ->
-            AnalysisResultSection(
-                result = result,
-                analysisType = uiState.analysisType,
-                onGetUrgencyColor = onGetUrgencyColor,
-                onGetSafetyColor = onGetSafetyColor,
-                onGetLevelDisplayText = onGetLevelDisplayText
-            )
-        }
-
-        // Error Display
-        uiState.error?.let { error ->
-            ErrorCard(
-                error = error,
-                onDismiss = onClearError
-            )
+            LoadingIndicator("Analyzing image...")
+        } else if (uiState.error != null) {
+            ErrorCard(title = "Analysis Error") {
+                Column {
+                    Text(
+                        text = uiState.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        CardActionButton(text = "Dismiss", onClick = onClearError)
+                    }
+                }
+            }
+        } else if (uiState.analysisResult != null) {
+            AnalysisResultSection(result = uiState.analysisResult)
         }
 
         // Disclaimer
-        DisclaimerCard()
+        DisclaimerSection()
     }
 
-    // Image Picker Dialog
     if (uiState.showImagePicker) {
         ImagePickerDialog(
             onCameraSelected = onCameraSelected,
@@ -278,269 +180,78 @@ private fun ImageTriageScreenContent(
 }
 
 @Composable
-private fun ImageTriageHeader() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.medicalSurface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.CameraAlt,
-                contentDescription = "Image Analysis",
-                modifier = Modifier.size(32.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-
-            Text(
-                text = "Image Analysis",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Bold
-            )
-
-            Text(
-                text = "AI-powered medical and structural assessment",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-        }
-    }
-}
-
-@Composable
-private fun AnalysisTypeSelector(
+private fun AnalysisTypeSection(
     selectedType: ImageTriageViewModel.AnalysisTypeOption,
     onTypeSelected: (ImageTriageViewModel.AnalysisTypeOption) -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                text = "Analysis Type",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.SemiBold
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ImageTriageViewModel.AnalysisTypeOption.entries.forEach { option ->
-                    AnalysisTypeChip(
-                        option = option,
-                        isSelected = option == selectedType,
-                        onClick = { onTypeSelected(option) },
-                        modifier = Modifier.weight(1f)
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        SectionHeader("1. Select Analysis Type")
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            ImageTriageViewModel.AnalysisTypeOption.entries.forEachIndexed { index, option ->
+                val (icon, color) = when (option) {
+                    ImageTriageViewModel.AnalysisTypeOption.MEDICAL -> Icons.Default.LocalHospital to SemanticColors.Error
+                    ImageTriageViewModel.AnalysisTypeOption.STRUCTURAL -> Icons.Default.Engineering to SemanticColors.Warning
+                    ImageTriageViewModel.AnalysisTypeOption.GENERAL -> Icons.Default.Visibility to SemanticColors.Info
+                }
+                SegmentedButton(
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = ImageTriageViewModel.AnalysisTypeOption.entries.size),
+                    onClick = { onTypeSelected(option) },
+                    selected = selectedType == option,
+                    icon = { Icon(icon, contentDescription = null, modifier = Modifier.size(SegmentedButtonDefaults.IconSize)) },
+                    colors = SegmentedButtonDefaults.colors(
+                        activeContainerColor = color,
+                        activeContentColor = Color.White,
+                        inactiveContainerColor = MaterialTheme.colorScheme.surfaceVariant
                     )
+                ) {
+                    Text(option.displayName)
                 }
             }
         }
     }
-}
-
-@Composable
-private fun AnalysisTypeChip(
-    option: ImageTriageViewModel.AnalysisTypeOption,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val (icon, color) = when (option) {
-        ImageTriageViewModel.AnalysisTypeOption.MEDICAL ->
-            Icons.Default.LocalHospital to MaterialTheme.colorScheme.emergencyMedium
-        ImageTriageViewModel.AnalysisTypeOption.STRUCTURAL ->
-            Icons.Default.Engineering to MaterialTheme.colorScheme.emergencyHigh
-        ImageTriageViewModel.AnalysisTypeOption.GENERAL ->
-            Icons.Default.Visibility to MaterialTheme.colorScheme.tertiary
-    }
-
-    FilterChip(
-        onClick = onClick,
-        label = {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = option.displayName,
-                    modifier = Modifier.size(20.dp),
-                    tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else color
-                )
-                Text(
-                    text = option.displayName,
-                    style = MaterialTheme.typography.labelMedium,
-                    textAlign = TextAlign.Center,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-                )
-            }
-        },
-        selected = isSelected,
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = color,
-            selectedLabelColor = MaterialTheme.colorScheme.onPrimary
-        ),
-        modifier = modifier.height(72.dp)
-    )
 }
 
 @Composable
 private fun ImageInputSection(
     selectedImage: android.graphics.Bitmap?,
-    hasImage: Boolean,
-    isAnalyzing: Boolean,
     onSelectImage: () -> Unit,
     onClearImage: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                text = "Image",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.SemiBold
-            )
-
-            if (hasImage && selectedImage != null) {
-                ImageDisplay(
-                    image = selectedImage,
-                    isAnalyzing = isAnalyzing,
-                    onClearImage = onClearImage
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        SectionHeader("2. Provide an Image")
+        if (selectedImage != null) {
+            Box(contentAlignment = Alignment.TopEnd) {
+                Image(
+                    bitmap = selectedImage.asImageBitmap(),
+                    contentDescription = "Selected image for analysis",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(220.dp)
+                        .clip(RoundedCornerShape(16.dp)),
+                    contentScale = ContentScale.Crop
                 )
-            } else {
-                ImageSelectionArea(onSelectImage = onSelectImage)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ImageDisplay(
-    image: android.graphics.Bitmap,
-    isAnalyzing: Boolean,
-    onClearImage: () -> Unit
-) {
-    Box(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Image(
-            bitmap = image.asImageBitmap(),
-            contentDescription = "Selected image",
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp)
-                .clip(RoundedCornerShape(8.dp)),
-            contentScale = ContentScale.Crop
-        )
-
-        // Analysis overlay
-        if (isAnalyzing) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Color.Black.copy(alpha = 0.5f),
-                        RoundedCornerShape(8.dp)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                IconButton(
+                    onClick = onClearImage,
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
                 ) {
-                    CircularProgressIndicator(
-                        color = MaterialTheme.colorScheme.primary,
-                        strokeWidth = 4.dp
-                    )
-                    Text(
-                        text = "Analyzing...",
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Icon(Icons.Default.Close, contentDescription = "Clear Image", tint = Color.White)
                 }
             }
-        }
-
-        // Clear button
-        if (!isAnalyzing) {
-            IconButton(
-                onClick = onClearImage,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp)
-                    .background(
-                        Color.Black.copy(alpha = 0.5f),
-                        CircleShape
-                    )
+        } else {
+            Surface(
+                onClick = onSelectImage,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Remove image",
-                    tint = Color.White
+                EmptyState(
+                    icon = Icons.Default.AddAPhoto,
+                    title = "Add an Image",
+                    subtitle = "Tap to use your camera or select a photo from your gallery.",
+                    modifier = Modifier.padding(vertical = 24.dp)
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun ImageSelectionArea(onSelectImage: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(200.dp)
-            .border(
-                2.dp,
-                MaterialTheme.colorScheme.outline,
-                RoundedCornerShape(8.dp)
-            )
-            .clip(RoundedCornerShape(8.dp))
-            .clickable { onSelectImage() },
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.CameraAlt,
-                contentDescription = "Select image",
-                modifier = Modifier.size(48.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Tap to Capture or Select Image",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                text = "Camera • Gallery",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-            )
         }
     }
 }
@@ -551,40 +262,21 @@ private fun CustomQuestionSection(
     onQuestionChanged: (String) -> Unit,
     analysisType: ImageTriageViewModel.AnalysisTypeOption
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                text = "Specific Question (Optional)",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.SemiBold
-            )
-
-            val placeholder = when (analysisType) {
-                ImageTriageViewModel.AnalysisTypeOption.MEDICAL ->
-                    "e.g., Is this wound infected? What treatment is needed?"
-                ImageTriageViewModel.AnalysisTypeOption.STRUCTURAL ->
-                    "e.g., Is this structure safe? What are the main concerns?"
-                ImageTriageViewModel.AnalysisTypeOption.GENERAL ->
-                    "e.g., What do you see? What should I be concerned about?"
-            }
-
-            OutlinedTextField(
-                value = question,
-                onValueChange = onQuestionChanged,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Ask a specific question") },
-                placeholder = { Text(placeholder) },
-                maxLines = 3,
-                textStyle = EmergencyTextStyles.InputText
-            )
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        SectionHeader("3. Add Details (Optional)")
+        val placeholder = when (analysisType) {
+            ImageTriageViewModel.AnalysisTypeOption.MEDICAL -> "e.g., Patient is conscious, complaining of leg pain."
+            ImageTriageViewModel.AnalysisTypeOption.STRUCTURAL -> "e.g., I heard a loud crack from this support beam."
+            ImageTriageViewModel.AnalysisTypeOption.GENERAL -> "e.g., What are the most important things to note here?"
         }
+        OutlinedTextField(
+            value = question,
+            onValueChange = onQuestionChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Describe the situation or ask a question") },
+            placeholder = { Text(placeholder) },
+            maxLines = 4
+        )
     }
 }
 
@@ -593,515 +285,188 @@ private fun AnalyzeButton(
     onClick: () -> Unit,
     analysisType: ImageTriageViewModel.AnalysisTypeOption
 ) {
-    val (icon, color, text) = when (analysisType) {
-        ImageTriageViewModel.AnalysisTypeOption.MEDICAL -> Triple(
-            Icons.Default.LocalHospital,
-            MaterialTheme.colorScheme.emergencyMedium,
-            "Analyze Medical Condition"
-        )
-        ImageTriageViewModel.AnalysisTypeOption.STRUCTURAL -> Triple(
-            Icons.Default.Engineering,
-            MaterialTheme.colorScheme.emergencyHigh,
-            "Analyze Structural Damage"
-        )
-        ImageTriageViewModel.AnalysisTypeOption.GENERAL -> Triple(
-            Icons.Default.Visibility,
-            MaterialTheme.colorScheme.tertiary,
-            "Analyze Image"
-        )
-    }
-
     Button(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = color
-        )
+            .height(56.dp)
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = text,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
+        Icon(Icons.Default.Psychology, contentDescription = null, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
         Text(
-            text = text,
-            style = EmergencyTextStyles.ButtonText,
+            text = "Analyze ${analysisType.displayName}",
+            style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold
         )
     }
 }
 
 @Composable
-private fun AnalysisProgressCard(
-    analysisType: ImageTriageViewModel.AnalysisTypeOption,
-    progress: Float,
-    onCancel: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Analyzing ${analysisType.displayName}...",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    fontWeight = FontWeight.SemiBold
-                )
+private fun AnalysisResultSection(result: ImageTriageViewModel.AnalysisResult) {
+    val isDark = isSystemInDarkTheme()
+    val (icon, title, surfaceTint) = when (result) {
+        is ImageTriageViewModel.AnalysisResult.Medical -> Triple(
+            Icons.Default.LocalHospital,
+            "Medical Analysis Result",
+            if (isDark) SurfaceTints.RedDark else SurfaceTints.Red
+        )
+        is ImageTriageViewModel.AnalysisResult.Structural -> Triple(
+            Icons.Default.Engineering,
+            "Structural Analysis Result",
+            if (isDark) SurfaceTints.OrangeDark else SurfaceTints.Orange
+        )
+        is ImageTriageViewModel.AnalysisResult.General -> Triple(
+            Icons.Default.Visibility,
+            "General Analysis Result",
+            if (isDark) SurfaceTints.BlueDark else SurfaceTints.Blue
+        )
+    }
 
-                TextButton(onClick = onCancel) {
-                    Text("Cancel")
-                }
-            }
-
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.primary,
-            )
-
-            Text(
-                text = "Please wait while the AI analyzes your image...",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-            )
+    ResultCard(title = title, icon = icon, surfaceTint = surfaceTint) {
+        when (result) {
+            is ImageTriageViewModel.AnalysisResult.Medical -> MedicalResultContent(result)
+            is ImageTriageViewModel.AnalysisResult.Structural -> StructuralResultContent(result)
+            is ImageTriageViewModel.AnalysisResult.General -> GeneralResultContent(result)
         }
     }
 }
 
 @Composable
-private fun AnalysisResultSection(
-    result: ImageTriageViewModel.AnalysisResult,
-    analysisType: ImageTriageViewModel.AnalysisTypeOption,
-    onGetUrgencyColor: (ResponseParser.UrgencyLevel) -> Color,
-    onGetSafetyColor: (ResponseParser.SafetyStatus) -> Color,
-    onGetLevelDisplayText: (Any) -> String
-) {
-    when (result) {
-        is ImageTriageViewModel.AnalysisResult.Medical -> {
-            MedicalResultCard(
-                result = result,
-                onGetUrgencyColor = onGetUrgencyColor,
-                onGetLevelDisplayText = onGetLevelDisplayText
-            )
+private fun MedicalResultContent(result: ImageTriageViewModel.AnalysisResult.Medical) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        StatusBadge(
+            level = result.urgencyLevel,
+            text = result.urgencyLevel.name.replace('_', ' '),
+            icon = when (result.urgencyLevel) {
+                ResponseParser.UrgencyLevel.CRITICAL -> Icons.Default.Warning
+                else -> Icons.Default.Info
+            }
+        )
+        Text(result.assessment, style = MaterialTheme.typography.bodyLarge)
+        if (result.recommendations.isNotEmpty()) {
+            ResultList(title = "Recommended Actions", items = result.recommendations)
         }
-        is ImageTriageViewModel.AnalysisResult.Structural -> {
-            StructuralResultCard(
-                result = result,
-                onGetSafetyColor = onGetSafetyColor,
-                onGetLevelDisplayText = onGetLevelDisplayText
-            )
+        if (result.requiresProfessionalCare) {
+            ResultCard(title = "Professional Care Required", icon = Icons.Default.PriorityHigh, iconTint = SemanticColors.Error) {
+                Text("This assessment indicates that immediate professional medical attention is necessary.", style = MaterialTheme.typography.bodyMedium)
+            }
         }
-        is ImageTriageViewModel.AnalysisResult.General -> {
-            GeneralResultCard(result = result)
-        }
+        ResultMetadata(confidence = result.confidenceLevel, timeMs = result.analysisTimeMs)
     }
 }
 
 @Composable
-private fun MedicalResultCard(
-    result: ImageTriageViewModel.AnalysisResult.Medical,
-    onGetUrgencyColor: (ResponseParser.UrgencyLevel) -> Color,
-    onGetLevelDisplayText: (Any) -> String
-) {
-    ResultCard(
-        title = "Medical Analysis",
-        icon = Icons.Default.LocalHospital,
-        containerColor = MaterialTheme.colorScheme.medicalSurface
-    ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Urgency Level Badge
-            UrgencyLevelBadge(
-                urgencyLevel = result.urgencyLevel,
-                onGetUrgencyColor = onGetUrgencyColor,
-                onGetLevelDisplayText = onGetLevelDisplayText
-            )
-
-            // Assessment
-            Text(
-                text = result.assessment,
-                style = EmergencyTextStyles.AnalysisResult,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            // Recommendations
-            if (result.recommendations.isNotEmpty()) {
-                RecommendationsList(
-                    title = "Recommended Actions:",
-                    items = result.recommendations,
-                    icon = Icons.AutoMirrored.Filled.ArrowRight
-                )
+private fun StructuralResultContent(result: ImageTriageViewModel.AnalysisResult.Structural) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        StatusBadge(
+            level = result.safetyStatus,
+            text = result.safetyStatus.name.replace('_', ' '),
+            icon = when (result.safetyStatus) {
+                ResponseParser.SafetyStatus.CRITICAL, ResponseParser.SafetyStatus.UNSAFE -> Icons.Default.Dangerous
+                else -> Icons.Default.CheckCircle
             }
-
-            // Professional Care Warning
-            if (result.requiresProfessionalCare) {
-                ProfessionalCareWarning()
-            }
-
-            // Metadata
-            ResultMetadata(
-                confidenceLevel = result.confidenceLevel,
-                analysisTimeMs = result.analysisTimeMs
-            )
+        )
+        Text(result.assessment, style = MaterialTheme.typography.bodyLarge)
+        if (result.identifiedIssues.isNotEmpty()) {
+            ResultList("Identified Issues", result.identifiedIssues, Icons.Default.Report, SemanticColors.Error)
         }
-    }
-}
-
-@Composable
-private fun StructuralResultCard(
-    result: ImageTriageViewModel.AnalysisResult.Structural,
-    onGetSafetyColor: (ResponseParser.SafetyStatus) -> Color,
-    onGetLevelDisplayText: (Any) -> String
-) {
-    ResultCard(
-        title = "Structural Analysis",
-        icon = Icons.Default.Engineering,
-        containerColor = MaterialTheme.colorScheme.structuralSurface
-    ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Safety Status Badge
-            SafetyStatusBadge(
-                safetyStatus = result.safetyStatus,
-                onGetSafetyColor = onGetSafetyColor,
-                onGetLevelDisplayText = onGetLevelDisplayText
-            )
-
-            // Assessment
-            Text(
-                text = result.assessment,
-                style = EmergencyTextStyles.AnalysisResult,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            // Issues
-            if (result.identifiedIssues.isNotEmpty()) {
-                RecommendationsList(
-                    title = "Identified Issues:",
-                    items = result.identifiedIssues,
-                    icon = Icons.Default.Error,
-                    iconTint = MaterialTheme.colorScheme.error
-                )
-            }
-
-            // Immediate Actions
-            if (result.immediateActions.isNotEmpty()) {
-                RecommendationsList(
-                    title = "Immediate Actions:",
-                    items = result.immediateActions,
-                    icon = Icons.AutoMirrored.Filled.ArrowRight
-                )
-            }
-
-            // Metadata
-            ResultMetadata(
-                confidenceLevel = result.confidenceLevel,
-                analysisTimeMs = result.analysisTimeMs
-            )
+        if (result.immediateActions.isNotEmpty()) {
+            ResultList("Immediate Actions", result.immediateActions)
         }
+        ResultMetadata(confidence = result.confidenceLevel, timeMs = result.analysisTimeMs)
     }
 }
 
 @Composable
-private fun GeneralResultCard(
-    result: ImageTriageViewModel.AnalysisResult.General
-) {
-    ResultCard(
-        title = "General Analysis",
-        icon = Icons.Default.Visibility,
-        containerColor = MaterialTheme.colorScheme.generalSurface
-    ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Description
-            Text(
-                text = result.description,
-                style = EmergencyTextStyles.AnalysisResult,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            // Key Observations
-            if (result.keyObservations.isNotEmpty()) {
-                RecommendationsList(
-                    title = "Key Observations:",
-                    items = result.keyObservations,
-                    icon = Icons.Default.Info,
-                    iconTint = MaterialTheme.colorScheme.tertiary
-                )
-            }
-
-            // Suggested Actions
-            if (result.suggestedActions.isNotEmpty()) {
-                RecommendationsList(
-                    title = "Suggested Actions:",
-                    items = result.suggestedActions,
-                    icon = Icons.AutoMirrored.Filled.ArrowRight
-                )
-            }
-
-            // Metadata
-            ResultMetadata(
-                confidenceLevel = result.confidence,
-                analysisTimeMs = result.analysisTimeMs
-            )
+private fun GeneralResultContent(result: ImageTriageViewModel.AnalysisResult.General) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text(result.description, style = MaterialTheme.typography.bodyLarge)
+        if (result.keyObservations.isNotEmpty()) {
+            ResultList("Key Observations", result.keyObservations, Icons.Default.FindInPage, SemanticColors.Info)
         }
+        if (result.suggestedActions.isNotEmpty()) {
+            ResultList("Suggested Actions", result.suggestedActions)
+        }
+        ResultMetadata(confidence = result.confidence, timeMs = result.analysisTimeMs)
     }
 }
 
 @Composable
-private fun UrgencyLevelBadge(
-    urgencyLevel: ResponseParser.UrgencyLevel,
-    onGetUrgencyColor: (ResponseParser.UrgencyLevel) -> Color,
-    onGetLevelDisplayText: (Any) -> String
-) {
-    val color = onGetUrgencyColor(urgencyLevel)
-    val icon = when (urgencyLevel) {
-        ResponseParser.UrgencyLevel.CRITICAL -> Icons.Default.Warning
-        ResponseParser.UrgencyLevel.HIGH -> Icons.Default.PriorityHigh
-        ResponseParser.UrgencyLevel.MEDIUM -> Icons.Default.Info
-        ResponseParser.UrgencyLevel.LOW -> Icons.Default.CheckCircle
-        ResponseParser.UrgencyLevel.UNKNOWN -> Icons.AutoMirrored.Filled.Help
+private fun <T : Enum<T>> StatusBadge(level: T, text: String, icon: ImageVector) {
+    val color = when (level) {
+        is ResponseParser.UrgencyLevel -> when(level) {
+            ResponseParser.UrgencyLevel.CRITICAL -> SemanticColors.Critical
+            ResponseParser.UrgencyLevel.HIGH -> SemanticColors.High
+            ResponseParser.UrgencyLevel.MEDIUM -> SemanticColors.Medium
+            ResponseParser.UrgencyLevel.LOW -> SemanticColors.Success
+            ResponseParser.UrgencyLevel.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        is ResponseParser.SafetyStatus -> when(level) {
+            ResponseParser.SafetyStatus.CRITICAL -> SemanticColors.Critical
+            ResponseParser.SafetyStatus.UNSAFE -> SemanticColors.High
+            ResponseParser.SafetyStatus.CAUTION -> SemanticColors.Medium
+            ResponseParser.SafetyStatus.SAFE -> SemanticColors.Success
+            ResponseParser.SafetyStatus.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        else -> MaterialTheme.colorScheme.primary
     }
 
-    StatusBadge(
-        label = "${onGetLevelDisplayText(urgencyLevel)} Urgency",
-        icon = icon,
-        color = color
-    )
-}
-
-@Composable
-private fun SafetyStatusBadge(
-    safetyStatus: ResponseParser.SafetyStatus,
-    onGetSafetyColor: (ResponseParser.SafetyStatus) -> Color,
-    onGetLevelDisplayText: (Any) -> String
-) {
-    val color = onGetSafetyColor(safetyStatus)
-    val icon = when (safetyStatus) {
-        ResponseParser.SafetyStatus.CRITICAL -> Icons.Default.Dangerous
-        ResponseParser.SafetyStatus.UNSAFE -> Icons.Default.Warning
-        ResponseParser.SafetyStatus.CAUTION -> Icons.Default.Info
-        ResponseParser.SafetyStatus.SAFE -> Icons.Default.CheckCircle
-        ResponseParser.SafetyStatus.UNKNOWN -> Icons.AutoMirrored.Filled.Help
-    }
-
-    StatusBadge(
-        label = onGetLevelDisplayText(safetyStatus),
-        icon = icon,
-        color = color
-    )
-}
-
-@Composable
-private fun StatusBadge(
-    label: String,
-    icon: ImageVector,
-    color: Color
-) {
     Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = color.copy(alpha = 0.2f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color)
+        shape = RoundedCornerShape(24.dp),
+        color = color.copy(alpha = 0.1f),
+        border = BorderStroke(1.dp, color)
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = color
-            )
-            Text(
-                text = label,
-                style = EmergencyTextStyles.UrgencyLevel,
-                color = color,
-                fontWeight = FontWeight.Bold
-            )
+            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
+            Text(text, style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.Bold)
         }
     }
 }
 
 @Composable
-private fun RecommendationsList(
-    title: String,
-    items: List<String>,
-    icon: ImageVector,
-    iconTint: Color = MaterialTheme.colorScheme.primary
-) {
-    Column(
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            fontWeight = FontWeight.SemiBold
-        )
-
+private fun ResultList(title: String, items: List<String>, icon: ImageVector = Icons.AutoMirrored.Filled.PlaylistAddCheck, iconTint: Color = MaterialTheme.colorScheme.primary) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         items.forEach { item ->
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.Top
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = iconTint
-                )
-                Text(
-                    text = item,
-                    style = EmergencyTextStyles.RecommendationText,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
+            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(20.dp).padding(top = 2.dp))
+                Text(item, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun ProfessionalCareWarning() {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.warningCardBackground
-        )
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Warning,
-                contentDescription = "Warning",
-                tint = MaterialTheme.colorScheme.warningButton,
-                modifier = Modifier.size(20.dp)
-            )
-            Text(
-                text = "Professional medical care required",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-    }
-}
-
-@Composable
-private fun ResultMetadata(
-    confidenceLevel: Float,
-    analysisTimeMs: Long
-) {
+private fun ResultMetadata(confidence: Float, timeMs: Long) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "Confidence: ${(confidenceLevel * 100).toInt()}%",
-            style = EmergencyTextStyles.ConfidenceText,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = "Analysis: ${analysisTimeMs}ms",
-            style = EmergencyTextStyles.TimeText,
+            text = "Confidence: ${(confidence * 100).toInt()}% • Time: ${timeMs}ms",
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
 
 @Composable
-private fun ErrorCard(
-    error: String,
-    onDismiss: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
-        )
+private fun DisclaimerSection() {
+    ResultCard(
+        title = "Important Disclaimer",
+        icon = Icons.Default.Warning,
+        iconTint = SemanticColors.Warning,
+        surfaceTint = if (isSystemInDarkTheme()) SurfaceTints.OrangeDark else SurfaceTints.Orange
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Error,
-                contentDescription = "Error",
-                tint = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.size(24.dp)
-            )
-
-            Text(
-                text = error,
-                style = EmergencyTextStyles.ErrorText,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.weight(1f)
-            )
-
-            IconButton(onClick = onDismiss) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Dismiss error",
-                    tint = MaterialTheme.colorScheme.onErrorContainer
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun DisclaimerCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.warningCardBackground
+        Text(
+            text = "This AI assessment is for informational purposes only and is NOT a substitute for professional medical or structural evaluation. Always prioritize safety and seek help from qualified experts.",
+            style = MaterialTheme.typography.bodySmall
         )
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            Icon(
-                imageVector = Icons.Default.Warning,
-                contentDescription = "Warning",
-                tint = MaterialTheme.colorScheme.warningButton,
-                modifier = Modifier.size(20.dp)
-            )
-            Text(
-                text = "Important: This AI assessment is not a substitute for professional medical " +
-                        "or structural evaluation. " +
-                        "Always seek qualified professional assistance when available.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f)
-            )
-        }
     }
 }
 
@@ -1113,164 +478,27 @@ private fun ImagePickerDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "Select Image Source",
-                style = MaterialTheme.typography.headlineSmall
-            )
-        },
+        title = { Text("Choose Image Source") },
         text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Camera Option
-                ImageSourceOption(
-                    icon = Icons.Default.CameraAlt,
-                    title = "Camera",
-                    subtitle = "Take a new photo",
-                    onClick = onCameraSelected
-                )
-
-                // Gallery Option
-                ImageSourceOption(
-                    icon = Icons.Default.PhotoLibrary,
-                    title = "Gallery",
-                    subtitle = "Choose from existing photos",
-                    onClick = onGallerySelected
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ImageSourceOption(icon = Icons.Default.CameraAlt, text = "Use Camera", onClick = onCameraSelected)
+                ImageSourceOption(icon = Icons.Default.PhotoLibrary, text = "From Gallery", onClick = onGallerySelected)
             }
         },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
 }
 
 @Composable
-private fun ImageSourceOption(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit
-) {
-    Card(
+private fun ImageSourceOption(icon: ImageVector, text: String, onClick: () -> Unit) {
+    OutlinedButton(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = title,
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Column {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
-
-// Preview Parameter Provider
-class ImageTriageUiStateProvider : PreviewParameterProvider<ImageTriageViewModel.ImageTriageUiState> {
-    override val values = sequenceOf(
-        // Initial state
-        ImageTriageViewModel.ImageTriageUiState(),
-        // With image selected
-        ImageTriageViewModel.ImageTriageUiState(
-            hasImage = true,
-            customQuestion = "Is this wound infected?"
-        ),
-        // Analyzing state
-        ImageTriageViewModel.ImageTriageUiState(
-            hasImage = true,
-            isAnalyzing = true,
-            analysisProgress = 0.6f
-        ),
-        // Error state
-        ImageTriageViewModel.ImageTriageUiState(
-            hasImage = true,
-            error = "Analysis failed. Please try again with a clearer image."
-        )
-    )
-}
-
-// Preview Functions
-@Preview(
-    name = "Image Triage Screen",
-    apiLevel = 34,
-    showBackground = true
-)
-@Composable
-private fun ImageTriageScreenPreview(
-    @PreviewParameter(ImageTriageUiStateProvider::class) uiState: ImageTriageViewModel.ImageTriageUiState
-) {
-    CrisisCoachTheme {
-        Surface {
-            ImageTriageScreenContent(
-                uiState = uiState,
-                onAnalysisTypeSelected = {},
-                onSelectImage = {},
-                onClearImage = {},
-                onQuestionChanged = {},
-                onAnalyzeImage = {},
-                onCancelAnalysis = {},
-                onClearError = {},
-                onCameraSelected = {},
-                onGallerySelected = {},
-                onDismissImagePicker = {},
-                onGetUrgencyColor = { Color.Red },
-                onGetSafetyColor = { EmergencyColors.High },
-                onGetLevelDisplayText = { "High" }
-            )
-        }
-    }
-}
-
-@Preview(
-    name = "Image Triage Screen - Dark",
-    apiLevel = 34,
-    showBackground = true
-)
-@Composable
-private fun ImageTriageScreenDarkPreview() {
-    CrisisCoachTheme(darkTheme = true) {
-        Surface {
-            ImageTriageScreenContent(
-                uiState = ImageTriageViewModel.ImageTriageUiState(
-                    analysisType = ImageTriageViewModel.AnalysisTypeOption.MEDICAL,
-                    hasImage = true,
-                    customQuestion = "What treatment is needed for this injury?"
-                ),
-                onAnalysisTypeSelected = {},
-                onSelectImage = {},
-                onClearImage = {},
-                onQuestionChanged = {},
-                onAnalyzeImage = {},
-                onCancelAnalysis = {},
-                onClearError = {},
-                onCameraSelected = {},
-                onGallerySelected = {},
-                onDismissImagePicker = {},
-                onGetUrgencyColor = { Color.Red },
-                onGetSafetyColor = { EmergencyColors.High },
-                onGetLevelDisplayText = { "Critical" }
-            )
-        }
+        Icon(icon, contentDescription = null, Modifier.size(ButtonDefaults.IconSize))
+        Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+        Text(text)
     }
 }
