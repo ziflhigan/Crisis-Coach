@@ -2,7 +2,6 @@ package com.cautious5.crisis_coach.model.database
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.content.res.AssetManager
 import android.util.Log
 import com.cautious5.crisis_coach.model.database.entities.EmergencyInfo
 import com.cautious5.crisis_coach.model.database.entities.EmergencyInfo.Companion.Priorities
@@ -12,8 +11,9 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 
 /**
- * Handles initialization and population of the emergency knowledge base
- * Uses DocumentProcessor for flexible document loading
+ * Handles initialization and population of the emergency knowledge base.
+ * Loads documents from various sources including JSON, Markdown, CSV, and PDF files.
+ * Uses DocumentProcessor for flexible document loading and TextEmbedder for generating embeddings.
  */
 class DatabaseInitializer(
     private val context: Context,
@@ -27,42 +27,46 @@ class DatabaseInitializer(
         private const val PREFS_NAME = "knowledge_base_prefs"
         private const val KEY_DB_VERSION = "db_version"
         private const val KEY_LAST_INITIALIZED = "last_initialized"
-        private const val CURRENT_DB_VERSION = 2
+        private const val CURRENT_DB_VERSION = 3
 
         // Asset file paths
         private const val INITIAL_DATA_ASSET = "data/initial_knowledge_base.json"
         private const val EMERGENCY_DATA_ASSET = "raw/emergency_knowledge.json"
-
-        // Additional document sources
         private const val MARKDOWN_DOCS_PATH = "data/emergency_procedures.md"
         private const val CSV_DATA_PATH = "data/medical_protocols.csv"
-        private const val PDF_DATA_PATH = "data/pdfs/"
-
-        // ...
+        private const val PDF_DATA_PATH = "data/pdfs"
     }
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /**
-     * Initializes the knowledge base if needed
+     * Initializes the knowledge base if needed.
+     * Checks version, entry count, and data staleness to determine if initialization is required.
      */
     suspend fun initializeIfNeeded(): InitializationResult = withContext(Dispatchers.IO) {
-
-        Log.d(TAG, "Checking if knowledge base initialization is needed")
+        Log.d(TAG, "=== Starting Knowledge Base Initialization Check ===")
 
         val currentVersion = prefs.getInt(KEY_DB_VERSION, 0)
         val entryCount = knowledgeBase.getEntryCount()
+        val lastInitialized = prefs.getLong(KEY_LAST_INITIALIZED, 0)
+
+        Log.d(TAG, "Current DB version: $currentVersion (target: $CURRENT_DB_VERSION)")
+        Log.d(TAG, "Current entry count: $entryCount")
+        Log.d(TAG, "Last initialized: ${if (lastInitialized == 0L) "Never" else java.util.Date(lastInitialized)}")
+
+        // Debug: Check what's in the database
+        debugDatabaseContent()
 
         val needsInitialization = currentVersion < CURRENT_DB_VERSION ||
                 entryCount == 0L ||
                 isDataStale()
 
         if (!needsInitialization) {
-            Log.d(TAG, "Knowledge base is up to date (version: $currentVersion, entries: $entryCount)")
+            Log.i(TAG, "Knowledge base is up to date (version: $currentVersion, entries: $entryCount)")
             return@withContext InitializationResult.AlreadyInitialized
         }
 
-        Log.i(TAG, "Initializing knowledge base (current version: $currentVersion, target: $CURRENT_DB_VERSION)")
+        Log.i(TAG, "Initialization needed! Starting knowledge base population...")
 
         try {
             // Clear existing data if upgrading
@@ -72,9 +76,16 @@ class DatabaseInitializer(
             }
 
             // Load and populate initial data
+            val startTime = System.currentTimeMillis()
             when (val loadResult = loadAllDocuments()) {
                 is LoadResult.Success -> {
-                    Log.i(TAG, "Successfully loaded ${loadResult.totalEntries} entries from ${loadResult.sourceCount} sources")
+                    val elapsedTime = System.currentTimeMillis() - startTime
+                    Log.i(TAG, "✓ Successfully loaded ${loadResult.totalEntries} entries from ${loadResult.sourceCount} sources in ${elapsedTime}ms")
+
+                    if (loadResult.errors.isNotEmpty()) {
+                        Log.w(TAG, "Encountered ${loadResult.errors.size} errors during loading:")
+                        loadResult.errors.forEach { Log.w(TAG, "  - $it") }
+                    }
 
                     // Update version and timestamp
                     prefs.edit()
@@ -82,20 +93,23 @@ class DatabaseInitializer(
                         .putLong(KEY_LAST_INITIALIZED, System.currentTimeMillis())
                         .apply()
 
+                    // Debug: Verify what was loaded
+                    debugDatabaseContent()
+
                     InitializationResult.Success(
                         entriesAdded = loadResult.totalEntries,
                         sourcesProcessed = loadResult.sourceCount,
-                        initializationTimeMs = loadResult.processingTimeMs
+                        initializationTimeMs = elapsedTime
                     )
                 }
                 is LoadResult.Error -> {
-                    Log.e(TAG, "Failed to load initial data: ${loadResult.message}")
+                    Log.e(TAG, "✗ Failed to load initial data: ${loadResult.message}")
                     InitializationResult.Error(loadResult.message, loadResult.cause)
                 }
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Database initialization failed", e)
+            Log.e(TAG, "✗ Database initialization failed with exception", e)
             InitializationResult.Error("Initialization failed: ${e.message}", e)
         }
     }
@@ -126,9 +140,11 @@ class DatabaseInitializer(
     }
 
     /**
-     * Loads all documents from various sources
+     * Loads all documents from various sources in the assets folder.
+     * Processes JSON, Markdown, CSV, and PDF files to create emergency info entries.
      */
     private suspend fun loadAllDocuments(): LoadResult = withContext(Dispatchers.IO) {
+        Log.d(TAG, "=== Loading Documents from Assets ===")
         val startTime = System.currentTimeMillis()
         val allEntries = mutableListOf<EmergencyInfo>()
         val errors = mutableListOf<String>()
@@ -136,6 +152,7 @@ class DatabaseInitializer(
 
         try {
             // 1. Load JSON documents
+            Log.d(TAG, "--- Loading JSON documents ---")
             val jsonSources = listOf(
                 INITIAL_DATA_ASSET to DocumentProcessor.DocumentMetadata(
                     source = "Initial Knowledge Base",
@@ -152,13 +169,19 @@ class DatabaseInitializer(
             )
 
             jsonSources.forEach { (assetPath, metadata) ->
+                Log.d(TAG, "Loading JSON: $assetPath")
                 loadDocumentFromAsset(assetPath, metadata)?.let { entries ->
+                    Log.d(TAG, "Loaded ${entries.size} entries from $assetPath")
                     allEntries.addAll(entries)
                     sourceCount++
-                } ?: errors.add("Failed to load: $assetPath")
+                } ?: run {
+                    Log.w(TAG, "Failed to load: $assetPath")
+                    errors.add("Failed to load: $assetPath")
+                }
             }
 
-            // 2. Load Markdown documents (if they exist)
+            // 2. Load Markdown documents
+            Log.d(TAG, "--- Loading Markdown documents ---")
             loadDocumentFromAsset(
                 MARKDOWN_DOCS_PATH,
                 DocumentProcessor.DocumentMetadata(
@@ -169,11 +192,13 @@ class DatabaseInitializer(
                     chunkingStrategy = DocumentProcessor.ChunkingStrategy.PARAGRAPH_BASED
                 )
             )?.let { entries ->
+                Log.d(TAG, "Loaded ${entries.size} entries from Markdown")
                 allEntries.addAll(entries)
                 sourceCount++
-            }
+            } ?: Log.d(TAG, "No Markdown documents found")
 
-            // 3. Load CSV data (if exists)
+            // 3. Load CSV data
+            Log.d(TAG, "--- Loading CSV data ---")
             loadDocumentFromAsset(
                 CSV_DATA_PATH,
                 DocumentProcessor.DocumentMetadata(
@@ -183,29 +208,53 @@ class DatabaseInitializer(
                     priority = 1
                 )
             )?.let { entries ->
+                Log.d(TAG, "Loaded ${entries.size} entries from CSV")
                 allEntries.addAll(entries)
                 sourceCount++
-            }
+            } ?: Log.d(TAG, "No CSV data found")
 
-            // 4. Load PDF data (if exists)
-            // Return list of files
+            // 4. Load PDF documents
+            Log.d(TAG, "--- Loading PDF documents ---")
             val assetManager = context.assets
-            val files = assetManager.list(PDF_DATA_PATH)
-            if (files != null) {
-                for (file in files) {
-                    loadDocumentFromAsset(
-                        file,
-                        DocumentProcessor.DocumentMetadata(
-                            source = "Emergency Guides",
-                            format = DocumentProcessor.DocumentFormat.PDF,
-                            category = "emergency",
-                            priority = 1
-                        )
-                    )?.let { entries ->
-                        allEntries.addAll(entries)
-                        sourceCount++
+            try {
+                val pdfFiles = assetManager.list(PDF_DATA_PATH)
+                Log.d(TAG, "AssetManager.list($PDF_DATA_PATH) -> ${pdfFiles?.size ?: 0} files")
+                if (!pdfFiles.isNullOrEmpty()) {
+                    Log.d(TAG, "Found ${pdfFiles.size} files in PDF directory:")
+                    pdfFiles.forEach { Log.d(TAG, "  - $it") }
+
+                    for (fileName in pdfFiles) {
+                        if (fileName.endsWith(".pdf", ignoreCase = true)) {
+                            val fullPath = "$PDF_DATA_PATH/$fileName"
+                            Log.d(TAG, "Processing PDF: $fullPath")
+
+                            loadDocumentFromAsset(
+                                fullPath,
+                                DocumentProcessor.DocumentMetadata(
+                                    source = fileName.removeSuffix(".pdf"),
+                                    format = DocumentProcessor.DocumentFormat.PDF,
+                                    category = "emergency",
+                                    priority = 1,
+                                    chunkingStrategy = DocumentProcessor.ChunkingStrategy.PARAGRAPH_BASED
+                                )
+                            )?.let { entries ->
+                                Log.d(TAG, "Loaded ${entries.size} entries from $fileName")
+                                allEntries.addAll(entries)
+                                sourceCount++
+                            } ?: run {
+                                Log.w(TAG, "Failed to process PDF: $fileName")
+                                errors.add("Failed to process PDF: $fileName")
+                            }
+                        } else {
+                            Log.d(TAG, "Skipping non-PDF file: $fileName")
+                        }
                     }
+                } else {
+                    Log.d(TAG, "No PDF files found in $PDF_DATA_PATH")
                 }
+            } catch (e: IOException) {
+                Log.e(TAG, "Failed to list PDF directory: ${e.message}")
+                errors.add("Failed to access PDF directory: ${e.message}")
             }
 
             // If no documents loaded, create default data
@@ -215,16 +264,17 @@ class DatabaseInitializer(
                 sourceCount = 1
             }
 
-            // Generate embeddings for entries that don't have them
+            Log.d(TAG, "--- Generating embeddings for ${allEntries.size} entries ---")
             val processedEntries = processEntriesWithEmbeddings(allEntries)
 
-            // Add entries to database in batch
+            Log.d(TAG, "--- Adding ${processedEntries.size} entries to database ---")
             val batchResult = knowledgeBase.addEmergencyInfoBatch(processedEntries)
 
             val processingTime = System.currentTimeMillis() - startTime
 
             when (batchResult) {
                 is BatchAddResult.Success -> {
+                    Log.i(TAG, "Batch add successful: ${batchResult.successfulIds.size} entries added")
                     LoadResult.Success(
                         totalEntries = batchResult.successfulIds.size,
                         sourceCount = sourceCount,
@@ -233,6 +283,7 @@ class DatabaseInitializer(
                     )
                 }
                 is BatchAddResult.Error -> {
+                    Log.e(TAG, "Batch add failed: ${batchResult.message}")
                     LoadResult.Error("Batch add failed: ${batchResult.message}", batchResult.cause)
                 }
             }
@@ -244,18 +295,20 @@ class DatabaseInitializer(
     }
 
     /**
-     * Loads a document from assets using DocumentProcessor
+     * Loads a document from assets using DocumentProcessor.
+     * Returns a list of EmergencyInfo entries or null if loading fails.
      */
     private suspend fun loadDocumentFromAsset(
         assetPath: String,
         metadata: DocumentProcessor.DocumentMetadata
     ): List<EmergencyInfo>? {
         return try {
+            Log.d(TAG, "Attempting to load asset: $assetPath")
             val inputStream = context.assets.open(assetPath)
 
             when (val result = documentProcessor.processDocument(inputStream, metadata)) {
                 is DocumentProcessResult.Success -> {
-                    Log.d(TAG, "Loaded ${result.entries.size} entries from ${metadata.source}")
+                    Log.d(TAG, "Successfully processed ${metadata.source}: ${result.entries.size} entries")
                     result.entries
                 }
                 is DocumentProcessResult.Error -> {
@@ -264,33 +317,37 @@ class DatabaseInitializer(
                 }
             }
         } catch (e: IOException) {
-            Log.d(TAG, "Asset file not found: $assetPath")
+            Log.d(TAG, "Asset file not found: $assetPath (this is normal if optional)")
             null
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load asset: $assetPath", e)
+            Log.e(TAG, "Unexpected error loading asset: $assetPath", e)
             null
         }
     }
 
     /**
-     * Processes entries to ensure they have embeddings
+     * Processes entries to ensure they have valid embeddings.
+     * Generates embeddings for entries that don't have them using TextEmbedder.
      */
     private suspend fun processEntriesWithEmbeddings(
         entries: List<EmergencyInfo>
     ): List<EmergencyInfo> = withContext(Dispatchers.IO) {
+        Log.d(TAG, "Processing ${entries.size} entries for embeddings...")
 
         val processedEntries = mutableListOf<EmergencyInfo>()
         var embeddingGenerationCount = 0
+        var skippedCount = 0
 
-        entries.forEach { entry ->
+        entries.forEachIndexed { index, entry ->
             try {
                 if (entry.embedding.isEmpty() && entry.text.isNotBlank()) {
+                    Log.v(TAG, "Generating embedding for entry ${index + 1}/${entries.size}: ${entry.title}")
                     entry.embedding = textEmbedder.embedText(entry.text)
                     embeddingGenerationCount++
 
                     // Log progress every 10 entries
                     if (embeddingGenerationCount % 10 == 0) {
-                        Log.d(TAG, "Generated embeddings for $embeddingGenerationCount entries")
+                        Log.d(TAG, "Progress: Generated embeddings for $embeddingGenerationCount entries")
                     }
                 }
 
@@ -298,16 +355,47 @@ class DatabaseInitializer(
                 if (entry.hasValidEmbedding() && entry.text.isNotBlank()) {
                     processedEntries.add(entry)
                 } else {
-                    Log.w(TAG, "Skipping invalid entry: ${entry.title}")
+                    Log.w(TAG, "Skipping invalid entry: ${entry.title} (has embedding: ${entry.embedding.isNotEmpty()}, text length: ${entry.text.length})")
+                    skippedCount++
                 }
 
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to process entry: ${entry.title} - ${e.message}")
+                Log.e(TAG, "Failed to process entry ${index + 1}: ${entry.title} - ${e.message}")
+                skippedCount++
             }
         }
 
-        Log.d(TAG, "Processed ${processedEntries.size} entries, generated $embeddingGenerationCount embeddings")
+        Log.i(TAG, "Embedding processing complete: ${processedEntries.size} valid entries, $embeddingGenerationCount embeddings generated, $skippedCount skipped")
         processedEntries
+    }
+
+    /**
+     * Debug helper to check database content
+     */
+    private suspend fun debugDatabaseContent() = withContext(Dispatchers.IO) {
+        try {
+            val stats = knowledgeBase.getStatistics()
+            Log.d(TAG, "=== Database Content Debug ===")
+            Log.d(TAG, "Total entries: ${stats.totalEntries}")
+            Log.d(TAG, "Categories: ${stats.categoryCounts}")
+            Log.d(TAG, "Priorities: ${stats.priorityCounts}")
+            Log.d(TAG, "Languages: ${stats.languageCounts}")
+
+            // Sample a few entries for debugging
+            val sampleQuery = "emergency"
+            when (val sampleResults = knowledgeBase.searchRelevantInfo(sampleQuery, limit = 3)) {
+                is SearchResult.Success -> {
+                    Log.d(TAG, "Sample search for '$sampleQuery' returned ${sampleResults.entries.size} results")
+                    sampleResults.entries.forEach { entry ->
+                        Log.d(TAG, "  - ${entry.info.title} (relevance: ${entry.relevanceScore})")
+                    }
+                }
+                else -> Log.d(TAG, "Sample search returned no results")
+            }
+            Log.d(TAG, "==============================")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to debug database content", e)
+        }
     }
 
     /**
@@ -435,7 +523,7 @@ sealed class InitializationResult {
         val initializationTimeMs: Long
     ) : InitializationResult()
 
-    object AlreadyInitialized : InitializationResult()
+    data object AlreadyInitialized : InitializationResult()
 
     data class Error(
         val message: String,

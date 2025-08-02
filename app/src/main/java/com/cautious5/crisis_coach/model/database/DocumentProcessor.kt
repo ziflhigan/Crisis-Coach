@@ -81,7 +81,7 @@ class DocumentProcessor(
                 DocumentFormat.MARKDOWN -> processMarkdownDocument(inputStream, metadata)
                 DocumentFormat.CSV -> processCsvDocument(inputStream, metadata)
                 DocumentFormat.XML -> processXmlDocument(inputStream, metadata)
-                DocumentFormat.PDF -> processPdfDocument(inputStream, metadata) //Updated to include PDF Support
+                DocumentFormat.PDF -> processPdfDocument(inputStream, metadata)
             }
 
             if (entries.isEmpty()) {
@@ -269,35 +269,91 @@ class DocumentProcessor(
         inputStream: InputStream,
         metadata: DocumentMetadata
     ): List<EmergencyInfo> {
-        // Declare entries here
+        Log.d(TAG, "=== Processing PDF Document: ${metadata.source} ===")
+
         val entries = mutableListOf<EmergencyInfo>()
-        // Parse the document here
-        var pdfReader: PdfReader? = PdfReader(inputStream)
-        var pdfDocument: PdfDocument? = PdfDocument(pdfReader)
-        val pageCount = pdfDocument?.numberOfPages
-        val extractedText = StringBuilder()
-        for (i in 1..pageCount!!) {
-            val page = pdfDocument?.getPage(i)
-            val text = PdfTextExtractor.getTextFromPage(page, SimpleTextExtractionStrategy())
-            extractedText.append(text)
-        }
-        // free up memory n close
-        pdfReader?.close()
-        pdfDocument?.close()
-        inputStream.close()
+        var pdfReader: PdfReader? = null
+        var pdfDocument: PdfDocument? = null
 
-        Log.i(TAG, extractedText.toString()) // Purely debugging
+        try {
+            // Initialize PDF reader
+            pdfReader = PdfReader(inputStream)
+            pdfDocument = PdfDocument(pdfReader)
+            val pageCount = pdfDocument.numberOfPages
 
-        // Implement Chunking here and then return the entries
-        // addition of entries will have metadata in it
+            Log.d(TAG, "PDF Details:")
+            Log.d(TAG, "  - Source: ${metadata.source}")
+            Log.d(TAG, "  - Pages: $pageCount")
+            Log.d(TAG, "  - Chunking: ${metadata.chunkingStrategy}")
 
-        val final_text = extractedText.toString()
+            // Extract text from all pages
+            val extractedText = StringBuilder()
+            for (pageNum in 1..pageCount) {
+                try {
+                    val page = pdfDocument.getPage(pageNum)
+                    val pageText = PdfTextExtractor.getTextFromPage(page, SimpleTextExtractionStrategy())
 
-        return when (metadata.chunkingStrategy) {
-            ChunkingStrategy.FIXED_SIZE -> chunkBySize(final_text, metadata)
-            ChunkingStrategy.SENTENCE_BASED -> chunkBySentences(final_text, metadata)
-            ChunkingStrategy.PARAGRAPH_BASED -> chunkByParagraphs(final_text, metadata)
-            ChunkingStrategy.SEMANTIC -> chunkBySize(final_text, metadata) // Fallback for now
+                    Log.d(TAG, "Page $pageNum raw text length = ${pageText.length}")
+
+                    if (pageText.isNotBlank()) {
+                        extractedText.append(pageText).append("\n\n")
+                        Log.d(TAG, "  - Page $pageNum: ${pageText.length} characters extracted")
+                    } else {
+                        Log.w(TAG, "  - Page $pageNum: No text found")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "  Failed to extract text from page $pageNum: ${e.message}")
+                }
+            }
+
+            val fullText = extractedText.toString().trim()
+            Log.d(TAG, "Total text extracted: ${fullText.length} characters")
+
+            if (fullText.isBlank()) {
+                Log.w(TAG, "No text content found in PDF")
+                return emptyList()
+            }
+
+            // Log a sample of the extracted text for debugging
+            val sampleLength = minOf(200, fullText.length)
+            Log.d(TAG, "Text sample: ${fullText.take(sampleLength)}...")
+
+            // Apply chunking strategy
+            val chunks = when (metadata.chunkingStrategy) {
+                ChunkingStrategy.FIXED_SIZE -> {
+                    Log.d(TAG, "Using FIXED_SIZE chunking")
+                    chunkBySize(fullText, metadata)
+                }
+                ChunkingStrategy.SENTENCE_BASED -> {
+                    Log.d(TAG, "Using SENTENCE_BASED chunking")
+                    chunkBySentences(fullText, metadata)
+                }
+                ChunkingStrategy.PARAGRAPH_BASED -> {
+                    Log.d(TAG, "Using PARAGRAPH_BASED chunking")
+                    chunkByParagraphs(fullText, metadata)
+                }
+                ChunkingStrategy.SEMANTIC -> {
+                    Log.d(TAG, "Using SEMANTIC chunking (fallback to FIXED_SIZE)")
+                    chunkBySize(fullText, metadata)
+                }
+            }
+
+            Log.i(TAG, "PDF processing complete: Generated ${chunks.size} chunks from ${metadata.source}")
+            return chunks
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to process PDF document: ${metadata.source}", e)
+            return emptyList()
+        } finally {
+            // Clean up resources
+            try {
+                pdfDocument?.close()
+                pdfReader?.close()
+                inputStream.close()
+                Log.v(TAG, "PDF resources cleaned up")
+            } catch (e: Exception) {
+                Log.w(TAG, "Error cleaning up PDF resources: ${e.message}")
+            }
         }
     }
 

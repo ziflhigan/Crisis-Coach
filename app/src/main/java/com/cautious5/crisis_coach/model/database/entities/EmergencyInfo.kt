@@ -33,7 +33,7 @@ data class EmergencyInfo(
      * Generated using MediaPipe TextEmbedder or similar embedding model
      * HNSW index enables fast nearest-neighbor search
      */
-    @HnswIndex(dimensions = 512) // Adjust dimensions based on embedding model
+    @HnswIndex(dimensions = 100)
     var embedding: FloatArray = floatArrayOf(),
 
     /**

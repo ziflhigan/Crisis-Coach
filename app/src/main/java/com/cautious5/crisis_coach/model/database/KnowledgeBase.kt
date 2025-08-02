@@ -204,6 +204,53 @@ class KnowledgeBase(
     }
 
     /**
+     * Debug helper to check and log database content
+     */
+    suspend fun debugDatabaseContent() = withContext(Dispatchers.IO) {
+        try {
+            val count = getEntryCount()
+            val stats = getStatistics()
+
+            Log.d(TAG, "=== Knowledge Base Debug Info ===")
+            Log.d(TAG, "Total entries: $count")
+            Log.d(TAG, "By category: ${stats.categoryCounts}")
+            Log.d(TAG, "By priority: ${stats.priorityCounts}")
+
+            // Try a test search
+            val testQueries = listOf("CPR", "bleeding", "first aid", "emergency")
+            testQueries.forEach { query ->
+                when (val results = searchRelevantInfo(query, limit = 2)) {
+                    is SearchResult.Success -> {
+                        Log.d(TAG, "Search '$query': Found ${results.entries.size} results")
+                        results.entries.forEach { entry ->
+                            Log.d(TAG, "  - ${entry.info.title} (score: ${String.format("%.2f", entry.relevanceScore)})")
+                        }
+                    }
+                    is SearchResult.NoResults -> {
+                        Log.d(TAG, "Search '$query': No results found")
+                    }
+                    is SearchResult.Error -> {
+                        Log.d(TAG, "Search '$query': Error - ${results.message}")
+                    }
+                }
+            }
+
+            // List first few entries
+            val allEntries = emergencyInfoBox.all.take(5)
+            if (allEntries.isNotEmpty()) {
+                Log.d(TAG, "First ${allEntries.size} entries:")
+                allEntries.forEach { entry ->
+                    Log.d(TAG, "  - [${entry.category}] ${entry.title} (embedding size: ${entry.embedding.size})")
+                }
+            }
+
+            Log.d(TAG, "=================================")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to debug database content", e)
+        }
+    }
+
+    /**
      * Gets all emergency information entries for a specific category
      */
     suspend fun getByCategory(category: String): List<EmergencyInfo> = withContext(Dispatchers.IO) {
