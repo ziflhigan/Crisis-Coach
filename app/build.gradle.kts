@@ -18,6 +18,22 @@ android {
         noCompress.add("tflite")
     }
 
+    packaging {
+        resources {
+            // Exclude all files that might cause conflicts from the META-INF directory
+            excludes.add("META-INF/DEPENDENCIES")
+            excludes.add("META-INF/LICENSE")
+            excludes.add("META-INF/LICENSE.txt")
+            excludes.add("META-INF/license.txt")
+            excludes.add("META-INF/NOTICE")
+            excludes.add("META-INF/NOTICE.txt")
+            excludes.add("META-INF/notice.txt")
+            excludes.add("META-INF/ASL2.0")
+            excludes.add("META-INF/*.kotlin_module")
+            excludes.add("META-INF/versions/9/OSGI-INF/MANIFEST.MF")
+        }
+    }
+
     defaultConfig {
         applicationId = "com.cautious5.crisis_coach"
         minSdk = 30
@@ -100,6 +116,6 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.okhttp)
 
-    // PDFbox
-    implementation(libs.itext7.core)
+    implementation(libs.itext7.core.android)
+    implementation(libs.slf4j.android)
 }
