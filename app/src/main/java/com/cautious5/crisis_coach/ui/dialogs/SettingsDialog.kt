@@ -263,7 +263,6 @@ private fun GenerationSettingsTab(
     onGenerationParamsChanged: (GenerationParams) -> Unit,
     onApplyGenerationParams: () -> Unit
 ) {
-    // FIX 3c: Use the new extension function `toGenerationParams()`
     val activeParams = pendingGenerationParams ?: currentConfig.toGenerationParams()
     var temperature by remember(activeParams) { mutableFloatStateOf(activeParams.temperature) }
     var topK by remember(activeParams) { mutableIntStateOf(activeParams.topK) }
@@ -279,62 +278,88 @@ private fun GenerationSettingsTab(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+            .verticalScroll(rememberScrollState())
     ) {
-        ParameterSlider(
-            label = "Temperature",
-            value = temperature,
-            onValueChange = { temperature = it },
-            range = 0f..2f,
-            steps = 19,
-            valueLabel = "%.2f".format(Locale.US, temperature),
-            enabled = !isApplyingParams
-        )
-        ParameterSlider(
-            label = "Top-K",
-            value = topK.toFloat(),
-            onValueChange = { topK = it.toInt() },
-            range = 1f..100f,
-            steps = 98,
-            valueLabel = topK.toString(),
-            enabled = !isApplyingParams
-        )
-        ParameterSlider(
-            label = "Top-P",
-            value = topP,
-            onValueChange = { topP = it },
-            range = 0f..1f,
-            steps = 19,
-            valueLabel = "%.2f".format(Locale.US, topP),
-            enabled = !isApplyingParams
-        )
-        ParameterSlider(
-            label = "Max Output Tokens",
-            value = maxTokens.toFloat(),
-            onValueChange = { maxTokens = it.toInt() },
-            range = 128f..4096f,
-            steps = 30,
-            valueLabel = maxTokens.toString(),
-            enabled = !isApplyingParams
-        )
-
-        Spacer(Modifier.weight(1f))
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            ParameterSlider(
+                label = "Temperature",
+                value = temperature,
+                onValueChange = { temperature = it },
+                range = 0f..2f,
+                steps = 19,
+                valueLabel = "%.2f".format(Locale.US, temperature),
+                enabled = !isApplyingParams
+            )
+            ParameterSlider(
+                label = "Top-K",
+                value = topK.toFloat(),
+                onValueChange = { topK = it.toInt() },
+                range = 1f..100f,
+                steps = 98,
+                valueLabel = topK.toString(),
+                enabled = !isApplyingParams
+            )
+            ParameterSlider(
+                label = "Top-P",
+                value = topP,
+                onValueChange = { topP = it },
+                range = 0f..1f,
+                steps = 19,
+                valueLabel = "%.2f".format(Locale.US, topP),
+                enabled = !isApplyingParams
+            )
+            ParameterSlider(
+                label = "Max Output Tokens",
+                value = maxTokens.toFloat(),
+                onValueChange = { maxTokens = it.toInt() },
+                range = 128f..4096f,
+                steps = 30,
+                valueLabel = maxTokens.toString(),
+                enabled = !isApplyingParams
+            )
+        }
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (isApplyingParams) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                Spacer(Modifier.width(16.dp))
+            TextButton(
+                onClick = {
+                    // Reset local state to the data class defaults
+                    val defaults = GenerationParams()
+                    temperature = defaults.temperature
+                    topK = defaults.topK
+                    topP = defaults.topP
+                    maxTokens = defaults.maxOutputTokens
+                },
+                enabled = !isApplyingParams
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = "Reset to defaults")
+                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                Text("Reset")
             }
+
             Button(
                 onClick = onApplyGenerationParams,
                 enabled = hasChanges && !isApplyingParams
             ) {
-                Text("Apply Changes")
+                if (isApplyingParams) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                    Text("Applying...")
+                } else {
+                    Text("Apply Changes")
+                }
             }
         }
     }

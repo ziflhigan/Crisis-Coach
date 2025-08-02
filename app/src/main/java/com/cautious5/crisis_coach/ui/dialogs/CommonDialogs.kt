@@ -35,7 +35,7 @@ fun ModelReloadingDialog(isApplyingParams: Boolean) {
                 val subtitle = if (isApplyingParams) {
                     "Please wait while new generation settings are applied..."
                 } else {
-                    "Please wait while the hardware configuration is updated..."
+                    "Please wait while the hardware configuration is updated... (this may take up to few minutes for the first time)"
                 }
 
                 Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
