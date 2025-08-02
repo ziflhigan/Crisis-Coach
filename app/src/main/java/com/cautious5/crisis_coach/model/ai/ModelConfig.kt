@@ -65,7 +65,7 @@ enum class ModelVariant(
     GEMMA_3N_E2B(
         displayName = "Gemma 3n E2B (Standard)",
         effectiveParams = "2B",
-        approximateRamUsageMB = 3072,
+        approximateRamUsageMB = 3100,
         fileName = "gemma-3n-E2B-it-int4.task",
         huggingFaceRepo = "google/gemma-3n-E2B-it-litert-preview",
         downloadFileName = "gemma-3n-E2B-it-int4.task"
@@ -73,7 +73,7 @@ enum class ModelVariant(
     GEMMA_3N_E4B(
         displayName = "Gemma 3n E4B (High Quality)",
         effectiveParams = "4B",
-        approximateRamUsageMB = 4096,
+        approximateRamUsageMB = 4400,
         fileName = "gemma-3n-E4B-it-int4.task",
         huggingFaceRepo = "google/gemma-3n-E4B-it-litert-preview",
         downloadFileName = "gemma-3n-E4B-it-int4.task"
