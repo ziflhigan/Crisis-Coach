@@ -57,7 +57,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val currentModelConfig: ModelConfig? = null,
         val isModelReloading: Boolean = false,
         val reloadProgress: Float = 0f,
-        val modelDownloadStatus: Map<ModelVariant, Boolean> = emptyMap()
+        val modelDownloadStatus: Map<ModelVariant, Boolean> = emptyMap(),
+        val isApplyingParams: Boolean = false,
+        val pendingGenerationParams: GenerationParams? = null
     )
 
     private val hfAuthManager by lazy { HuggingFaceAuthManager(getApplication()) }
@@ -322,24 +324,78 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateGenerationParams(params: GenerationParams) {
-        _uiState.value.currentModelConfig?.let { config ->
-            val newConfig = config.copy(
-                temperature = params.temperature,
-                topK = params.topK,
-                topP = params.topP,
-                maxOutputTokens = params.maxOutputTokens
+        // Just save the pending params, don't apply immediately
+        _uiState.update {
+            it.copy(pendingGenerationParams = params)
+        }
+
+        // Save to SharedPreferences immediately for persistence
+        saveGenerationParams(params)
+
+        Log.d(TAG, "Generation parameters updated in pending state")
+    }
+
+    fun applyGenerationParams() {
+        val pendingParams = _uiState.value.pendingGenerationParams ?: return
+        val currentConfig = _uiState.value.currentModelConfig ?: return
+
+        Log.d(TAG, "Applying pending generation parameters")
+
+        // Update the config in UI state
+        val newConfig = currentConfig.copy(
+            temperature = pendingParams.temperature,
+            topK = pendingParams.topK,
+            topP = pendingParams.topP,
+            maxOutputTokens = pendingParams.maxOutputTokens
+        )
+
+        _uiState.update {
+            it.copy(
+                currentModelConfig = newConfig,
+                isApplyingParams = true,
+                isModelReloading = true,
+                reloadProgress = 0f,
+                pendingGenerationParams = null
             )
-            _uiState.update { it.copy(currentModelConfig = newConfig) }
+        }
 
-            // Save to SharedPreferences
-            saveGenerationParams(params)
-
-            // Apply to model immediately (no need to reinitialize for generation params)
-            viewModelScope.launch {
-                getApplication<CrisisCoachApplication>().gemmaModelManager.apply {
-                    // The params will be used in the next session creation
-                    Log.d(TAG, "Generation parameters updated and saved")
+        // Apply the parameters to the model
+        viewModelScope.launch {
+            try {
+                // Monitor model loading progress during parameter application
+                launch {
+                    getApplication<CrisisCoachApplication>()
+                        .gemmaModelManager.loadProgress.collect { progress ->
+                            _uiState.update { it.copy(reloadProgress = progress) }
+                        }
                 }
+
+                getApplication<CrisisCoachApplication>()
+                    .gemmaModelManager.applyGenerationParams(pendingParams)
+
+                Log.d(TAG, "Generation parameters applied successfully")
+
+                _uiState.update {
+                    it.copy(
+                        isApplyingParams = false,
+                        isModelReloading = false,
+                        reloadProgress = 1f
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to apply generation parameters: ${e.message}", e)
+
+                // Revert to previous config on error
+                _uiState.update {
+                    it.copy(
+                        currentModelConfig = currentConfig,
+                        isApplyingParams = false,
+                        isModelReloading = false,
+                        reloadProgress = 0f,
+                        pendingGenerationParams = pendingParams // Keep pending params for retry
+                    )
+                }
+
             }
         }
     }

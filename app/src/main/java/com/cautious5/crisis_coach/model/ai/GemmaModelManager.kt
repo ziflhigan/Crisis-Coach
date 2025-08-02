@@ -1,28 +1,27 @@
 package com.cautious5.crisis_coach.model.ai
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.tasks.genai.llminference.GraphOptions
+import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.system.measureTimeMillis
+import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import android.annotation.SuppressLint
-import com.google.mediapipe.framework.image.BitmapImageBuilder
-import com.google.mediapipe.tasks.genai.llminference.LlmInference
-import com.google.mediapipe.tasks.genai.llminference.GraphOptions
-import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
-import java.io.IOException
-import com.google.mediapipe.tasks.core.BaseOptions
+import kotlin.system.measureTimeMillis
 
 /**
  * Main interface for Gemma model operations using MediaPipe LLM Inference API
@@ -36,7 +35,8 @@ class GemmaModelManager private constructor(
     companion object {
         private const val TAG = "GemmaModelManager"
 
-        @Volatile private var INSTANCE: GemmaModelManager? = null
+        @Volatile
+        private var INSTANCE: GemmaModelManager? = null
 
         fun getInstance(ctx: Context): GemmaModelManager =
             INSTANCE ?: synchronized(this) {
@@ -81,13 +81,21 @@ class GemmaModelManager private constructor(
 
             return@withContext try {
                 val initTime = measureTimeMillis {
+                    // Phase 1: File preparation (0% to 80%)
                     val modelPath = modelLoader.prepareModelFile(config.variant) { progress ->
-                        _loadProgress.value = progress
+                        _loadProgress.value = progress * 0.8f  // Scale to 80% max
                     }
 
                     if (modelPath != null) {
+                        // Small progress bump to show transition
+                        _loadProgress.value = 0.85f
+
+                        // Phase 2: Model initialization (85% to 100%)
                         initializeMediaPipeModel(modelPath, config)
+
+                        // Complete
                         _currentConfig.value = config
+                        _loadProgress.value = 1.0f
                         _modelState.value = ModelState.READY
                     } else {
                         throw IOException("Failed to find or extract model file: ${config.variant.fileName}")
@@ -98,6 +106,7 @@ class GemmaModelManager private constructor(
                 InitializationResult.Success
             } catch (e: Exception) {
                 _modelState.value = ModelState.ERROR
+                _loadProgress.value = 0f
                 Log.e(TAG, "Model init failed: ${e.message}", e)
                 InitializationResult.Error("Model init failed: ${e.message}", e)
             }
@@ -157,7 +166,8 @@ class GemmaModelManager private constructor(
                                     val inferenceTime = System.currentTimeMillis() - startTime
 
                                     // Update performance metrics
-                                    _performanceMetrics.value = _performanceMetrics.value.withNewInference(inferenceTime)
+                                    _performanceMetrics.value =
+                                        _performanceMetrics.value.withNewInference(inferenceTime)
                                     _modelState.value = ModelState.READY
 
                                     continuation.resume(
@@ -226,7 +236,8 @@ class GemmaModelManager private constructor(
                 val inferenceTime = System.currentTimeMillis() - startTime
                 Log.d(TAG, "Image analysis completed in ${inferenceTime}ms")
 
-                _performanceMetrics.value = _performanceMetrics.value.withNewInference(inferenceTime)
+                _performanceMetrics.value =
+                    _performanceMetrics.value.withNewInference(inferenceTime)
                 _modelState.value = ModelState.READY
 
                 if (response != null) {
@@ -278,6 +289,73 @@ class GemmaModelManager private constructor(
     }
 
     /**
+     * Applies new generation parameters to the model without full re-initialization
+     * Recreates sessions for sampling params and engine for token limit changes
+     */
+    suspend fun applyGenerationParams(params: GenerationParams): Unit = withContext(Dispatchers.IO) {
+        val currentConfig = _currentConfig.value ?: return@withContext
+        Log.d(TAG, "Applying generation params: temp=${params.temperature}, topK=${params.topK}, topP=${params.topP}, maxTokens=${params.maxOutputTokens}")
+
+        val updatedConfig = currentConfig.copy(
+            temperature = params.temperature,
+            topK = params.topK,
+            topP = params.topP,
+            maxOutputTokens = params.maxOutputTokens
+        )
+
+        try {
+            // Check if we need to recreate the engine (for max tokens change)
+            val needsEngineRecreation = params.maxOutputTokens != currentConfig.maxOutputTokens
+
+            if (needsEngineRecreation) {
+                Log.d(TAG, "Max tokens changed, need to recreate engine")
+                _modelState.value = ModelState.LOADING
+                _loadProgress.value = 0.1f
+
+                // Close everything
+                textSession?.close()
+                visionSession?.close()
+                llmInference?.close()
+
+                textSession = null
+                visionSession = null
+                llmInference = null
+                textSessionConfig = null
+                visionSessionConfig = null
+
+                _loadProgress.value = 0.3f
+
+                // Recreate the engine with new config
+                val modelPath = modelLoader.getInternalModelPath(updatedConfig.variant)
+                initializeMediaPipeModel(modelPath, updatedConfig)
+
+                _loadProgress.value = 0.9f
+            } else {
+                Log.d(TAG, "Only sampling params changed, recreating sessions only")
+                // Just close sessions, they'll be recreated on next use with new params
+                textSession?.close()
+                visionSession?.close()
+                textSession = null
+                visionSession = null
+                textSessionConfig = null
+                visionSessionConfig = null
+            }
+
+            // Update the config
+            _currentConfig.value = updatedConfig
+            _modelState.value = ModelState.READY
+            _loadProgress.value = 1.0f
+
+            Log.i(TAG, "Generation parameters applied successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error applying generation parameters: ${e.message}", e)
+            _modelState.value = ModelState.ERROR
+            _loadProgress.value = 0f
+            throw e
+        }
+    }
+
+    /**
      * Gets current memory usage estimation
      */
     fun getMemoryUsage(): Long {
@@ -294,38 +372,48 @@ class GemmaModelManager private constructor(
     /**
      * Initializes the MediaPipe LLM Inference engine
      */
-    private suspend fun initializeMediaPipeModel(modelPath: String, config: ModelConfig) = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Initializing MediaPipe LLM Inference with path: $modelPath")
-        Log.d(TAG, "Hardware preference: ${config.hardwarePreference}")
-        Log.d(TAG, "Max Tokens set to: ${config.maxOutputTokens}")
+    private suspend fun initializeMediaPipeModel(modelPath: String, config: ModelConfig) =
+        withContext(Dispatchers.IO) {
+            Log.d(TAG, "Initializing MediaPipe LLM Inference with path: $modelPath")
+            Log.d(TAG, "Hardware preference: ${config.hardwarePreference}")
+            Log.d(TAG, "Max Tokens set to: ${config.maxOutputTokens}")
 
-        val optionsBuilder = LlmInference.LlmInferenceOptions.builder()
-            .setModelPath(modelPath)
-            .setMaxTokens(config.maxOutputTokens)
-            .setMaxNumImages(1) // Add this line for vision capabilities
+            val optionsBuilder = LlmInference.LlmInferenceOptions.builder()
+                .setModelPath(modelPath)
+                .setMaxTokens(config.maxOutputTokens)
+                .setMaxNumImages(1) // Add this line for vision capabilities
 
-        when (config.hardwarePreference) {
-            HardwarePreference.GPU_PREFERRED -> {
-                Log.d(TAG, "Configuring for GPU acceleration")
-                optionsBuilder.setPreferredBackend(LlmInference.Backend.GPU)
+            when (config.hardwarePreference) {
+                HardwarePreference.GPU_PREFERRED -> {
+                    Log.d(TAG, "Configuring for GPU acceleration")
+                    optionsBuilder.setPreferredBackend(LlmInference.Backend.GPU)
+                }
+
+                HardwarePreference.CPU_ONLY -> {
+                    Log.d(TAG, "Configuring for CPU only")
+                    optionsBuilder.setPreferredBackend(LlmInference.Backend.CPU)
+                }
+
+                HardwarePreference.NNAPI -> {
+                    Log.d(
+                        TAG,
+                        "NNAPI requested, but not supported by LLM Inference API. Using CPU."
+                    )
+                    optionsBuilder.setPreferredBackend(LlmInference.Backend.CPU)
+                }
+
+                HardwarePreference.AUTO -> {
+                    Log.d(TAG, "Using automatic hardware selection (default)")
+                    // Don't set backend, let MediaPipe decide
+                }
             }
-            HardwarePreference.CPU_ONLY -> {
-                Log.d(TAG, "Configuring for CPU only")
-                optionsBuilder.setPreferredBackend(LlmInference.Backend.CPU)
-            }
-            HardwarePreference.NNAPI -> {
-                Log.d(TAG, "NNAPI requested, but not supported by LLM Inference API. Using CPU.")
-                optionsBuilder.setPreferredBackend(LlmInference.Backend.CPU)
-            }
-            HardwarePreference.AUTO -> {
-                Log.d(TAG, "Using automatic hardware selection (default)")
-                // Don't set backend, let MediaPipe decide
-            }
+
+            llmInference = LlmInference.createFromOptions(context, optionsBuilder.build())
+            Log.i(
+                TAG,
+                "MediaPipe LLM Inference engine initialized successfully with ${config.hardwarePreference}"
+            )
         }
-
-        llmInference = LlmInference.createFromOptions(context, optionsBuilder.build())
-        Log.i(TAG, "MediaPipe LLM Inference engine initialized successfully with ${config.hardwarePreference}")
-    }
 
     /**
      * Creates a text-only session
@@ -334,7 +422,10 @@ class GemmaModelManager private constructor(
         val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
             .apply {
                 config?.let {
-                    Log.d(TAG, "Applying session params: Temp=${it.temperature}, TopK=${it.topK}, TopP=${it.topP}")
+                    Log.d(
+                        TAG,
+                        "Applying session params: Temp=${it.temperature}, TopK=${it.topK}, TopP=${it.topP}"
+                    )
                     setTemperature(it.temperature)
                     setTopK(it.topK)
                     setTopP(it.topP)

@@ -106,21 +106,28 @@ class ModelLoader(private val context: Context) {
     ) = withContext(Dispatchers.IO) {
         srcFd.createInputStream().use { input ->
             dst.outputStream().use { output ->
-                val buf = ByteArray(8192)
+                val buf = ByteArray(16384)
                 var copied = 0L
-                val total  = srcFd.length
-                var lastPct = 0
+                val total = srcFd.length
+                var lastProgressReported = 0
+
                 while (true) {
                     val read = input.read(buf)
                     if (read <= 0) break
+
                     output.write(buf, 0, read)
                     copied += read
-                    val pct = ((copied * 100) / total).toInt()
-                    if (pct != lastPct) { // throttle UI updates
-                        lastPct = pct
-                        onProgress(pct / 100f)
+
+                    // Throttle progress updates to avoid excessive UI updates
+                    val currentProgress = ((copied * 100) / total).toInt()
+                    if (currentProgress != lastProgressReported) {
+                        lastProgressReported = currentProgress
+                        onProgress(currentProgress / 100f)
                     }
                 }
+
+                // Ensure we report 100% completion
+                onProgress(1.0f)
             }
         }
     }

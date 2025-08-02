@@ -183,7 +183,9 @@ class MainActivity : ComponentActivity() {
                                 availableVariants = ModelVariant.entries,
                                 downloadState = uiState.downloadState,
                                 modelDownloadStatus = uiState.modelDownloadStatus,
-                                modelVariantForDownload = uiState.modelVariantForDownload, // Pass the state
+                                modelVariantForDownload = uiState.modelVariantForDownload,
+                                pendingGenerationParams = uiState.pendingGenerationParams,
+                                isApplyingParams = uiState.isApplyingParams,
                                 onDismiss = { mainViewModel.hideSettings() },
                                 onModelVariantSelected = { variant ->
                                     mainViewModel.selectModelVariant(variant)
@@ -194,6 +196,9 @@ class MainActivity : ComponentActivity() {
                                 onGenerationParamsChanged = { params ->
                                     mainViewModel.updateGenerationParams(params)
                                 },
+                                onApplyGenerationParams = {
+                                    mainViewModel.applyGenerationParams()
+                                },
                                 onDownloadModel = { variant ->
                                     mainViewModel.startModelDownload(variant)
                                 }
@@ -201,7 +206,10 @@ class MainActivity : ComponentActivity() {
                         }
 
                         if (uiState.isModelReloading) {
-                            ModelReloadingDialog(progress = uiState.reloadProgress)
+                            ModelReloadingDialog(
+                                progress = uiState.reloadProgress,
+                                isApplyingParams = uiState.isApplyingParams
+                            )
                         }
                     }
 
@@ -475,10 +483,13 @@ fun SettingsDialog(
     downloadState: ModelDownloader.DownloadState?,
     modelDownloadStatus: Map<ModelVariant, Boolean>,
     modelVariantForDownload: ModelVariant?,
+    pendingGenerationParams: GenerationParams?,
+    isApplyingParams: Boolean,
     onDismiss: () -> Unit,
     onModelVariantSelected: (ModelVariant) -> Unit,
     onHardwarePreferenceChanged: (HardwarePreference) -> Unit,
     onGenerationParamsChanged: (GenerationParams) -> Unit,
+    onApplyGenerationParams: () -> Unit,
     onDownloadModel: (ModelVariant) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -558,7 +569,10 @@ fun SettingsDialog(
 
                         2 -> GenerationSettingsTab(
                             currentConfig = currentConfig,
-                            onGenerationParamsChanged = onGenerationParamsChanged
+                            pendingGenerationParams = pendingGenerationParams,
+                            isApplyingParams = isApplyingParams,
+                            onGenerationParamsChanged = onGenerationParamsChanged,
+                            onApplyGenerationParams = onApplyGenerationParams
                         )
                     }
                 }
@@ -776,21 +790,31 @@ private fun HardwareSettingsTab(
 @Composable
 private fun GenerationSettingsTab(
     currentConfig: ModelConfig?,
-    onGenerationParamsChanged: (GenerationParams) -> Unit
+    pendingGenerationParams: GenerationParams?,
+    isApplyingParams: Boolean,
+    onGenerationParamsChanged: (GenerationParams) -> Unit,
+    onApplyGenerationParams: () -> Unit
 ) {
-    var temperature by remember { mutableFloatStateOf(currentConfig?.temperature ?: 0.7f) }
-    var topK by remember { mutableIntStateOf(currentConfig?.topK ?: 64) }
-    var topP by remember { mutableFloatStateOf(currentConfig?.topP ?: 0.95f) }
-    var maxTokens by remember { mutableIntStateOf(currentConfig?.maxOutputTokens ?: 512) }
+    // Use pending params if available, otherwise fall back to current config
+    val activeParams = pendingGenerationParams ?: GenerationParams(
+        temperature = currentConfig?.temperature ?: 0.7f,
+        topK = currentConfig?.topK ?: 64,
+        topP = currentConfig?.topP ?: 0.95f,
+        maxOutputTokens = currentConfig?.maxOutputTokens ?: 512
+    )
 
-    LaunchedEffect(currentConfig) {
-        currentConfig?.let {
-            temperature = it.temperature
-            topK = it.topK
-            topP = it.topP
-            maxTokens = it.maxOutputTokens
-        }
-    }
+    var temperature by remember(activeParams) { mutableFloatStateOf(activeParams.temperature) }
+    var topK by remember(activeParams) { mutableIntStateOf(activeParams.topK) }
+    var topP by remember(activeParams) { mutableFloatStateOf(activeParams.topP) }
+    var maxTokens by remember(activeParams) { mutableIntStateOf(activeParams.maxOutputTokens) }
+
+    // Track if parameters have changed from the applied config
+    val hasChanges = currentConfig?.let { config ->
+        temperature != config.temperature ||
+                topK != config.topK ||
+                topP != config.topP ||
+                maxTokens != config.maxOutputTokens
+    } ?: true
 
     Column(
         modifier = Modifier
@@ -828,7 +852,8 @@ private fun GenerationSettingsTab(
                     )
                 },
                 valueRange = 0f..2f,
-                modifier = Modifier.padding(top = 8.dp)
+                modifier = Modifier.padding(top = 8.dp),
+                enabled = !isApplyingParams
             )
         }
 
@@ -863,7 +888,8 @@ private fun GenerationSettingsTab(
                 },
                 valueRange = 1f..64f,
                 steps = 63,
-                modifier = Modifier.padding(top = 8.dp)
+                modifier = Modifier.padding(top = 8.dp),
+                enabled = !isApplyingParams
             )
         }
 
@@ -897,7 +923,8 @@ private fun GenerationSettingsTab(
                     )
                 },
                 valueRange = 0f..0.95f,
-                modifier = Modifier.padding(top = 8.dp)
+                modifier = Modifier.padding(top = 8.dp),
+                enabled = !isApplyingParams
             )
         }
 
@@ -932,36 +959,114 @@ private fun GenerationSettingsTab(
                 },
                 valueRange = 128f..4096f,
                 steps = (4096 - 128) / 128,
-                modifier = Modifier.padding(top = 8.dp)
+                modifier = Modifier.padding(top = 8.dp),
+                enabled = !isApplyingParams
             )
         }
 
-        // Reset button
-        TextButton(
-            onClick = {
-                temperature = 0.7f
-                topK = 64
-                topP = 0.95f
-                maxTokens = 512
-                onGenerationParamsChanged(
-                    GenerationParams(temperature, topK, topP, maxTokens)
+        // Show status if parameters are being applied
+        if (isApplyingParams) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
                 )
-            },
-            modifier = Modifier.align(Alignment.End)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                    Text(
+                        "Applying parameters to model...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+        }
+
+        // Action buttons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)
         ) {
-            Icon(
-                Icons.Default.Refresh,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Reset to Defaults")
+            // Reset button
+            TextButton(
+                onClick = {
+                    temperature = 0.7f
+                    topK = 64
+                    topP = 0.95f
+                    maxTokens = 512
+                    onGenerationParamsChanged(
+                        GenerationParams(temperature, topK, topP, maxTokens)
+                    )
+                },
+                enabled = !isApplyingParams
+            ) {
+                Icon(
+                    Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Reset")
+            }
+
+            // Apply button - only enabled if there are changes
+            Button(
+                onClick = onApplyGenerationParams,
+                enabled = hasChanges && !isApplyingParams
+            ) {
+                if (isApplyingParams) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Text(if (isApplyingParams) "Applying..." else "Apply")
+            }
+        }
+
+        // Info card
+        if (hasChanges && !isApplyingParams) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        "Click 'Apply' to use these parameters for AI generation",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-fun ModelReloadingDialog(progress: Float) {
+fun ModelReloadingDialog(
+    progress: Float,
+    isApplyingParams: Boolean = false
+) {
     Dialog(
         onDismissRequest = { /* Cannot dismiss while loading */ },
         properties = DialogProperties(dismissOnClickOutside = false, dismissOnBackPress = false)
@@ -982,7 +1087,11 @@ fun ModelReloadingDialog(progress: Float) {
                 CircularProgressIndicator()
 
                 Text(
-                    "Updating Hardware Configuration",
+                    text = if (isApplyingParams) {
+                        "Applying Generation Parameters"
+                    } else {
+                        "Updating Hardware Configuration"
+                    },
                     style = MaterialTheme.typography.titleMedium,
                     textAlign = TextAlign.Center
                 )
@@ -993,13 +1102,17 @@ fun ModelReloadingDialog(progress: Float) {
                 )
 
                 Text(
-                    "${(progress * 100).toInt()}%",
+                    text = "${(progress * 100).toInt()}%",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Text(
-                    "Please wait while the AI model is reconfigured...",
+                    text = if (isApplyingParams) {
+                        "Please wait while the AI model parameters are updated..."
+                    } else {
+                        "Please wait while the AI model is reconfigured..."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
