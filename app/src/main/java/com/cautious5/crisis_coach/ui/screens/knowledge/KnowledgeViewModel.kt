@@ -56,6 +56,7 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
         val isListening: Boolean = false,
         val searchResults: List<SearchEntry> = emptyList(),
         val ragAnswer: String = "",
+        val streamingAnswer: String = "",
         val error: String? = null,
         val selectedCategory: String? = null,
         val suggestedQueries: List<String> = SAMPLE_KNOWLEDGE_QUERIES,
@@ -71,7 +72,14 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
          */
         val isBusy: Boolean
             get() = isSearching || isGeneratingAnswer
+
+        /**
+         * Get the current answer text (streaming or final)
+         */
+        val currentAnswer: String
+            get() = if (isGeneratingAnswer && streamingAnswer.isNotEmpty()) streamingAnswer else ragAnswer
     }
+
 
     /**
      * Knowledge categories for filtering
@@ -110,6 +118,25 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
                     recognitionState = state,
                     isListening = state == RecognitionState.LISTENING || state == RecognitionState.SPEAKING
                 )
+            }
+        }
+
+        // Observe streaming text from GemmaModelManager
+        viewModelScope.launch {
+            gemmaModelManager.streamingText.collect { streamingText ->
+                if (gemmaModelManager.isStreaming.value && streamingText.isNotEmpty()) {
+                    _uiState.value = _uiState.value.copy(streamingAnswer = streamingText)
+                }
+            }
+        }
+
+        // Observe streaming state
+        viewModelScope.launch {
+            gemmaModelManager.isStreaming.collect { isStreaming ->
+                if (!isStreaming) {
+                    // When streaming stops, clear the streaming text
+                    _uiState.value = _uiState.value.copy(streamingAnswer = "")
+                }
             }
         }
     }
@@ -162,13 +189,11 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
         searchJob?.cancel()
         searchJob = null
 
-        // 2. Clear LLM response streams (if applicable, in this flow, they are tied to the job)
-        // If generateText was streaming, it would also stop when the scope is cancelled
-
-        // 3. Reset the UI state
+        // 2. Reset the UI state
         _uiState.value = _uiState.value.copy(
             isSearching = false,
             isGeneratingAnswer = false,
+            streamingAnswer = "",
             searchResults = emptyList(),
             ragAnswer = "",
             error = null,
@@ -331,7 +356,11 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private suspend fun generateFallbackAnswer(query: String) {
-        _uiState.value = _uiState.value.copy(isGeneratingAnswer = true)
+        _uiState.value = _uiState.value.copy(
+            isGeneratingAnswer = true,
+            streamingAnswer = "",
+            ragAnswer = ""
+        )
 
         try {
             val fallbackPrompt = PromptUtils.buildRAGPrompt(
@@ -340,15 +369,17 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
                 includeConfidenceNote = true
             )
 
-            gemmaModelManager.generateText(fallbackPrompt).collect { result ->
+            gemmaModelManager.generateTextWithRealtimeUpdates(fallbackPrompt).collect { result ->
                 when (result) {
                     is GenerationResult.Success -> {
                         val finalAnswer = PromptUtils.addSafetyDisclaimer(
                             result.text,
                             PromptUtils.DisclaimerType.GENERAL
                         )
+
                         _uiState.value = _uiState.value.copy(
                             ragAnswer = finalAnswer,
+                            streamingAnswer = "",
                             confidenceScore = 0.2f, // Low confidence without sources
                             isGeneratingAnswer = false
                         )
@@ -356,6 +387,7 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
                     is GenerationResult.Error -> {
                         _uiState.value = _uiState.value.copy(
                             ragAnswer = "Unable to generate answer. Please try again.",
+                            streamingAnswer = "",
                             isGeneratingAnswer = false
                         )
                     }
@@ -363,20 +395,27 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
             }
         } catch (e: Exception) {
             Log.e(TAG, "Fallback answer generation failed", e)
+
             _uiState.value = _uiState.value.copy(
                 isGeneratingAnswer = false,
+                streamingAnswer = "",
+                ragAnswer = "Unable to generate answer. Please try again.",
                 error = "Failed to generate answer"
             )
         }
     }
 
     /**
-     * Generate RAG answer using retrieved documents
+     * Generate RAG answer using retrieved documents with streaming support
      */
     private suspend fun generateRAGAnswer(query: String, searchEntries: List<SearchEntry>) {
         Log.d(TAG, "Generating RAG answer for query: $query")
 
-        _uiState.value = _uiState.value.copy(isGeneratingAnswer = true)
+        _uiState.value = _uiState.value.copy(
+            isGeneratingAnswer = true,
+            streamingAnswer = "",
+            ragAnswer = ""
+        )
 
         try {
             // Prepare retrieved documents
@@ -392,19 +431,23 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
                 includeConfidenceNote = true
             )
 
-            Log.d(TAG, "RAG prompt built, generating answer...")
+            Log.d(TAG, "RAG prompt built, generating answer with real-time updates...")
 
-            // Generate answer using Gemma
-            gemmaModelManager.generateText(ragPrompt).collect { result ->
+            // Extract sources used
+            val sources = searchEntries.take(3).map { it.info.source }.distinct()
+            val avgConfidence = searchEntries.take(3).map { it.relevanceScore }.average().toFloat()
+
+            // Update UI with sources immediately
+            _uiState.value = _uiState.value.copy(
+                sourcesUsed = sources,
+                confidenceScore = avgConfidence
+            )
+
+            // Generate answer using Gemma with real-time updates
+            gemmaModelManager.generateTextWithRealtimeUpdates(ragPrompt).collect { result ->
                 when (result) {
                     is GenerationResult.Success -> {
                         Log.d(TAG, "RAG answer generated successfully")
-
-                        // Extract sources used
-                        val sources = searchEntries.take(3).map { it.info.source }.distinct()
-
-                        // Calculate average confidence
-                        val avgConfidence = searchEntries.take(3).map { it.relevanceScore }.average().toFloat()
 
                         val finalAnswer = PromptUtils.addSafetyDisclaimer(
                             result.text,
@@ -413,16 +456,21 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
 
                         _uiState.value = _uiState.value.copy(
                             ragAnswer = finalAnswer,
-                            confidenceScore = avgConfidence,
+                            streamingAnswer = "",
+                            isGeneratingAnswer = false,
                             sourcesUsed = sources,
-                            isGeneratingAnswer = false
+                            confidenceScore = avgConfidence
                         )
                     }
                     is GenerationResult.Error -> {
                         Log.e(TAG, "RAG answer generation failed: ${result.message}")
+
                         _uiState.value = _uiState.value.copy(
                             ragAnswer = "I found relevant information but encountered an error generating the answer. Please refer to the search results below.",
-                            isGeneratingAnswer = false
+                            streamingAnswer = "",
+                            isGeneratingAnswer = false,
+                            sourcesUsed = sources,
+                            confidenceScore = avgConfidence
                         )
                         setError("Answer generation failed: ${result.message}")
                     }
@@ -431,9 +479,13 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
 
         } catch (e: Exception) {
             Log.e(TAG, "RAG answer generation exception", e)
+
             _uiState.value = _uiState.value.copy(
                 ragAnswer = "I found relevant information but encountered an error generating the answer. Please refer to the search results below.",
-                isGeneratingAnswer = false
+                streamingAnswer = "",
+                isGeneratingAnswer = false,
+                sourcesUsed = emptyList(),
+                confidenceScore = 0f
             )
             setError("Answer generation error: ${e.message}")
         }
@@ -456,11 +508,19 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     /**
-     * Use a suggested query
+     * Use a suggested query and automatically trigger search
      */
     fun useSuggestedQuery(query: String) {
         Log.d(TAG, "Using suggested query: $query")
-        updateQuery(query)
+        _uiState.value = _uiState.value.copy(query = query)
+
+        // Automatically trigger search for suggested queries
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            // Small delay to allow UI to update with the query text
+            delay(50)
+            performSearch(query)
+        }
     }
 
     /**
