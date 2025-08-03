@@ -441,7 +441,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             temperature = sharedPrefs.getFloat("temperature", 0.7f),
             topK = sharedPrefs.getInt("top_k", 64),
             topP = sharedPrefs.getFloat("top_p", 0.95f),
-            maxOutputTokens = sharedPrefs.getInt("max_tokens", 512)
+            maxOutputTokens = sharedPrefs.getInt("max_tokens", 4096)
         )
     }
 
