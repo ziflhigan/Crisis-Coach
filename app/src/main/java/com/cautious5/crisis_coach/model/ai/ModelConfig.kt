@@ -156,5 +156,5 @@ data class GenerationParams(
     val temperature: Float = 1.0f,
     val topK: Int = 64,
     val topP: Float = 0.95f,
-    val maxOutputTokens: Int = 512
+    val maxOutputTokens: Int = 4096
 )

@@ -51,6 +51,12 @@ class GemmaModelManager private constructor(
     private val _modelState = MutableStateFlow(ModelState.UNINITIALIZED)
     val modelState: StateFlow<ModelState> = _modelState.asStateFlow()
 
+    private val _streamingText = MutableStateFlow("")
+    val streamingText: StateFlow<String> = _streamingText.asStateFlow()
+
+    private val _isStreaming = MutableStateFlow(false)
+    val isStreaming: StateFlow<Boolean> = _isStreaming.asStateFlow()
+
     private val _performanceMetrics = MutableStateFlow(ModelPerformanceMetrics())
     val performanceMetrics: StateFlow<ModelPerformanceMetrics> = _performanceMetrics.asStateFlow()
 
@@ -144,12 +150,11 @@ class GemmaModelManager private constructor(
                 val currentModelConfig = _currentConfig.value
                 if (textSession == null || currentModelConfig != textSessionConfig) {
                     Log.d(TAG, "Creating new text session. Reason: New session or config change.")
-                    textSession?.close() // Close old session if it exists
+                    textSession?.close()
                     textSession = createTextSession(currentModelConfig)
-                    textSessionConfig = currentModelConfig // Store the config used
+                    textSessionConfig = currentModelConfig
                 }
 
-                // Add query and generate streaming response
                 textSession?.addQueryChunk(prompt)
 
                 val result = suspendCancellableCoroutine<GenerationResult> { continuation ->
@@ -165,7 +170,6 @@ class GemmaModelManager private constructor(
                                     isCompleted = true
                                     val inferenceTime = System.currentTimeMillis() - startTime
 
-                                    // Update performance metrics
                                     _performanceMetrics.value =
                                         _performanceMetrics.value.withNewInference(inferenceTime)
                                     _modelState.value = ModelState.READY
@@ -195,6 +199,99 @@ class GemmaModelManager private constructor(
                 Log.e(TAG, "Text generation failed: ${e.message}", e)
                 _modelState.value = ModelState.READY
                 emit(GenerationResult.Error("Text generation failed: ${e.message}", e))
+            }
+        }
+    }
+
+    /**
+     * For streaming text generation with real-time updates
+     * Updates streamingText StateFlow for UI to observe
+     */
+    fun generateTextWithRealtimeUpdates(
+        prompt: String,
+        maxTokens: Int? = null,
+        temperature: Float? = null
+    ): Flow<GenerationResult> = flow {
+        if (_modelState.value != ModelState.READY) {
+            emit(GenerationResult.Error("Model not ready. Current state: ${_modelState.value}"))
+            return@flow
+        }
+
+        if (prompt.isBlank()) {
+            emit(GenerationResult.Error("Prompt cannot be empty"))
+            return@flow
+        }
+
+        Log.d(TAG, "Generating text with real-time updates for prompt: ${prompt.take(50)}...")
+
+        inferenceDebugMutex.withLock {
+            _modelState.value = ModelState.BUSY
+            _isStreaming.value = true
+            _streamingText.value = ""
+
+            try {
+                val startTime = System.currentTimeMillis()
+                var fullResponse = ""
+                var tokenCount = 0
+
+                val currentModelConfig = _currentConfig.value
+                if (textSession == null || currentModelConfig != textSessionConfig) {
+                    Log.d(TAG, "Creating new text session for real-time updates.")
+                    textSession?.close()
+                    textSession = createTextSession(currentModelConfig)
+                    textSessionConfig = currentModelConfig
+                }
+
+                textSession?.addQueryChunk(prompt)
+
+                val result = suspendCancellableCoroutine<GenerationResult> { continuation ->
+                    var isCompleted = false
+
+                    textSession?.generateResponseAsync { partialResult, done ->
+                        try {
+                            if (!isCompleted) {
+                                fullResponse += partialResult
+                                tokenCount++
+
+                                // Update streaming text for UI to observe
+                                _streamingText.value = fullResponse
+
+                                if (done) {
+                                    isCompleted = true
+                                    val inferenceTime = System.currentTimeMillis() - startTime
+
+                                    _performanceMetrics.value =
+                                        _performanceMetrics.value.withNewInference(inferenceTime)
+                                    _modelState.value = ModelState.READY
+                                    _isStreaming.value = false
+
+                                    continuation.resume(
+                                        GenerationResult.Success(
+                                            text = fullResponse,
+                                            inferenceTimeMs = inferenceTime,
+                                            tokensGenerated = tokenCount
+                                        )
+                                    )
+                                }
+                            }
+                        } catch (e: Exception) {
+                            if (!isCompleted) {
+                                isCompleted = true
+                                _modelState.value = ModelState.READY
+                                _isStreaming.value = false
+                                continuation.resumeWithException(e)
+                            }
+                        }
+                    }
+                }
+
+                emit(result)
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Real-time text generation failed: ${e.message}", e)
+                _modelState.value = ModelState.READY
+                _isStreaming.value = false
+                emit(GenerationResult.Error("Real-time text generation failed: ${e.message}", e))
             }
         }
     }
