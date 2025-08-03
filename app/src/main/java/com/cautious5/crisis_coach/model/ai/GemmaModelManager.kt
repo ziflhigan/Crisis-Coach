@@ -9,6 +9,7 @@ import com.google.mediapipe.tasks.genai.llminference.GraphOptions
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -65,6 +66,8 @@ class GemmaModelManager private constructor(
 
     private val _loadProgress = MutableStateFlow(0f)
     val loadProgress: StateFlow<Float> = _loadProgress.asStateFlow()
+
+    private var currentGenerationJob: Job? = null
 
     // Thread safety
     private val inferenceDebugMutex = Mutex()
@@ -204,6 +207,31 @@ class GemmaModelManager private constructor(
     }
 
     /**
+     * Cancels any ongoing generation and resets state
+     */
+    fun cancelGeneration() {
+        Log.d(TAG, "Cancelling ongoing generation")
+
+        try {
+            // Reset streaming state first
+            _isStreaming.value = false
+            _streamingText.value = ""
+            _modelState.value = ModelState.READY
+
+            // Close sessions to stop any ongoing generation
+            textSession?.close()
+            visionSession?.close()
+            textSession = null
+            visionSession = null
+            textSessionConfig = null
+            visionSessionConfig = null
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during cancellation: ${e.message}")
+        }
+    }
+
+    /**
      * For streaming text generation with real-time updates
      * Updates streamingText StateFlow for UI to observe
      */
@@ -292,6 +320,100 @@ class GemmaModelManager private constructor(
                 _modelState.value = ModelState.READY
                 _isStreaming.value = false
                 emit(GenerationResult.Error("Real-time text generation failed: ${e.message}", e))
+            }
+        }
+    }
+
+    /**
+     * Generates streaming text response from image and text input (multimodal)
+     * Updates streamingText StateFlow for UI to observe in real-time
+     */
+    fun generateFromImageWithRealtimeUpdates(
+        image: Bitmap,
+        prompt: String = "Describe what you see and provide relevant advice."
+    ): Flow<GenerationResult> = flow {
+        if (_modelState.value != ModelState.READY) {
+            emit(GenerationResult.Error("Model not ready. Current state: ${_modelState.value}"))
+            return@flow
+        }
+
+        Log.d(TAG, "Starting streaming image analysis")
+
+        inferenceDebugMutex.withLock {
+            _modelState.value = ModelState.BUSY
+            _isStreaming.value = true
+            _streamingText.value = ""
+
+            try {
+                val startTime = System.currentTimeMillis()
+                var fullResponse = ""
+                var tokenCount = 0
+
+                // Recreate session if config changes
+                val currentModelConfig = _currentConfig.value
+                if (visionSession == null || currentModelConfig != visionSessionConfig) {
+                    visionSession?.close()
+                    visionSession = createVisionSession(currentModelConfig)
+                    visionSessionConfig = currentModelConfig
+                }
+
+                // Process image
+                val mpImage = BitmapImageBuilder(image).build()
+                visionSession?.addQueryChunk(prompt)
+                visionSession?.addImage(mpImage)
+
+                val result = suspendCancellableCoroutine<GenerationResult> { continuation ->
+                    var isCompleted = false
+
+                    visionSession?.generateResponseAsync { partialResult, done ->
+                        try {
+                            if (!isCompleted) {
+                                fullResponse += partialResult
+                                tokenCount++
+
+                                // Update streaming text
+                                if (tokenCount % 3 == 0 || done) {
+                                    _streamingText.value = fullResponse
+                                }
+
+                                if (done) {
+                                    isCompleted = true
+                                    val inferenceTime = System.currentTimeMillis() - startTime
+
+                                    _performanceMetrics.value =
+                                        _performanceMetrics.value.withNewInference(inferenceTime)
+                                    _modelState.value = ModelState.READY
+                                    _isStreaming.value = false
+
+                                    Log.d(TAG, "Streaming image analysis completed in ${inferenceTime}ms")
+
+                                    continuation.resume(
+                                        GenerationResult.Success(
+                                            text = fullResponse,
+                                            inferenceTimeMs = inferenceTime,
+                                            tokensGenerated = tokenCount
+                                        )
+                                    )
+                                }
+                            }
+                        } catch (e: Exception) {
+                            if (!isCompleted) {
+                                isCompleted = true
+                                _modelState.value = ModelState.READY
+                                _isStreaming.value = false
+                                continuation.resumeWithException(e)
+                            }
+                        }
+                    }
+                }
+
+                emit(result)
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Streaming image analysis failed: ${e.message}", e)
+                _modelState.value = ModelState.READY
+                _isStreaming.value = false
+                emit(GenerationResult.Error("Streaming image analysis failed: ${e.message}", e))
             }
         }
     }

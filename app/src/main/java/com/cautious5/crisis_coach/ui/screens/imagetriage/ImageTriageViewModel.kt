@@ -8,11 +8,17 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.cautious5.crisis_coach.CrisisCoachApplication
-import com.cautious5.crisis_coach.model.services.*
+import com.cautious5.crisis_coach.model.ai.GemmaModelManager
+import com.cautious5.crisis_coach.model.ai.GenerationResult
+import com.cautious5.crisis_coach.model.services.ImageAnalysisService
 import com.cautious5.crisis_coach.utils.Constants.LogTags
 import com.cautious5.crisis_coach.utils.Constants.AnalysisTypes
 import com.cautious5.crisis_coach.utils.ImageUtils
+import com.cautious5.crisis_coach.utils.PromptUtils
 import com.cautious5.crisis_coach.utils.ResponseParser
 
 /**
@@ -24,42 +30,63 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
 
     companion object {
         private const val TAG = LogTags.IMAGE_TRIAGE_VM
+        private const val PROGRESS_ANIMATION_DELAY = 50L
     }
 
-    // Services
+    private val gemmaModelManager: GemmaModelManager by lazy {
+        (getApplication<CrisisCoachApplication>()).gemmaModelManager
+    }
+
     private val imageAnalysisService: ImageAnalysisService by lazy {
-        (getApplication<CrisisCoachApplication>()).imageAnalysisService
+        ImageAnalysisService(getApplication(), gemmaModelManager)
     }
 
     /**
      * Analysis type options
      */
-    enum class AnalysisTypeOption(val value: String, val displayName: String) {
-        MEDICAL(AnalysisTypes.MEDICAL, "Medical"),
-        STRUCTURAL(AnalysisTypes.STRUCTURAL, "Structural"),
-        GENERAL(AnalysisTypes.GENERAL, "General")
+    enum class AnalysisTypeOption(
+        val value: String,
+        val displayName: String,
+        val description: String,
+        val examples: List<String>
+    ) {
+        MEDICAL(
+            value = AnalysisTypes.MEDICAL,
+            displayName = "Medical",
+            description = "Analyze injuries, wounds, and medical conditions",
+            examples = listOf("Cuts and wounds", "Burns", "Fractures", "Bleeding", "Swelling")
+        ),
+        STRUCTURAL(
+            value = AnalysisTypes.STRUCTURAL,
+            displayName = "Structural",
+            description = "Assess building damage and structural integrity",
+            examples = listOf("Cracks in walls", "Damaged bridges", "Collapsed roofs", "Foundation issues")
+        ),
+        GENERAL(
+            value = AnalysisTypes.GENERAL,
+            displayName = "General",
+            description = "General safety assessment and observations",
+            examples = listOf("Hazard identification", "Safety concerns", "Environmental risks")
+        )
     }
 
     /**
-     * UI state for image triage screen
+     *  Progress tracking with substeps
      */
-    data class ImageTriageUiState(
-        val selectedImage: Bitmap? = null,
-        val imageUri: Uri? = null,
-        val analysisType: AnalysisTypeOption = AnalysisTypeOption.MEDICAL,
-        val customQuestion: String = "",
-        val isAnalyzing: Boolean = false,
-        val analysisState: AnalysisState = AnalysisState.IDLE,
-        val analysisResult: AnalysisResult? = null,
-        val error: String? = null,
-        val showImagePicker: Boolean = false,
-        val showCameraCapture: Boolean = false,
-        val hasImage: Boolean = false,
-        val analysisProgress: Float = 0f
-    )
+    sealed class AnalysisProgress(val message: String, val value: Float) {
+        data object Idle : AnalysisProgress("Ready", 0f)
+        data object InitializingAnalysis : AnalysisProgress("Initializing analysis...", 0.1f)
+        data object PreprocessingImage : AnalysisProgress("Processing image...", 0.2f)
+        data object PreparingPrompt : AnalysisProgress("Preparing analysis parameters...", 0.3f)
+        data object ConnectingToModel : AnalysisProgress("Connecting to AI model...", 0.4f)
+        data object WaitingForResponse : AnalysisProgress("Waiting for AI response...", 0.5f)
+        data object StreamingResponse : AnalysisProgress("Analyzing...", 0.7f)
+        data object FinalizingResults : AnalysisProgress("Finalizing results...", 0.9f)
+        data object Complete : AnalysisProgress("Analysis complete", 1.0f)
+    }
 
     /**
-     * Analysis result wrapper for UI
+     * Analysis result wrapper
      */
     sealed class AnalysisResult {
         data class Medical(
@@ -68,7 +95,8 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
             val recommendations: List<String>,
             val requiresProfessionalCare: Boolean,
             val confidenceLevel: Float,
-            val analysisTimeMs: Long
+            val analysisTimeMs: Long,
+            val keyFindings: List<String> = emptyList()
         ) : AnalysisResult()
 
         data class Structural(
@@ -77,7 +105,9 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
             val identifiedIssues: List<String>,
             val immediateActions: List<String>,
             val confidenceLevel: Float,
-            val analysisTimeMs: Long
+            val analysisTimeMs: Long,
+            val structureType: String = "Unknown",
+            val damageLevel: String = "Unknown"
         ) : AnalysisResult()
 
         data class General(
@@ -85,133 +115,111 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
             val keyObservations: List<String>,
             val suggestedActions: List<String>,
             val confidence: Float,
-            val analysisTimeMs: Long
+            val analysisTimeMs: Long,
+            val riskLevel: String = "Unknown",
+            val safetyRecommendations: List<String> = emptyList()
         ) : AnalysisResult()
+    }
+
+    /**
+     * UI state with better progress tracking
+     */
+    data class ImageTriageUiState(
+        val selectedImage: Bitmap? = null,
+        val imageUri: Uri? = null,
+        val analysisType: AnalysisTypeOption = AnalysisTypeOption.MEDICAL,
+        val customQuestion: String = "",
+        val isAnalyzing: Boolean = false,
+        val analysisResult: AnalysisResult? = null,
+        val streamingAnalysis: String = "",
+        val analysisProgress: AnalysisProgress = AnalysisProgress.Idle,
+        val error: String? = null,
+        val showImagePicker: Boolean = false,
+        val confidence: Float = 0f,
+        val analysisTimeMs: Long = 0L,
+        val progressMessage: String = "",
+        val isModelReady: Boolean = false,
+        val showProcessingDialog: Boolean = false
+    ) {
+        val hasImage: Boolean get() = selectedImage != null
+        val isBusy: Boolean get() = isAnalyzing
+        val hasStreamingContent: Boolean get() = streamingAnalysis.isNotEmpty()
+        val hasFinalResult: Boolean get() = !isAnalyzing && analysisResult != null
+        val canAnalyze: Boolean get() = hasImage && !isAnalyzing && isModelReady
     }
 
     // State flows
     private val _uiState = MutableStateFlow(ImageTriageUiState())
     val uiState: StateFlow<ImageTriageUiState> = _uiState.asStateFlow()
 
+    // Track if we've started receiving streaming content
+    private val _streamingStarted = MutableStateFlow(false)
+
     init {
         Log.d(TAG, "ImageTriageViewModel initialized")
         initialize()
+
+        viewModelScope.launch {
+            gemmaModelManager.streamingText
+                .collect { streamingText ->
+                    if (streamingText.isNotEmpty() && _uiState.value.showProcessingDialog) {
+                        _uiState.update { it.copy(showProcessingDialog = false) }
+                    }
+                }
+        }
     }
 
     /**
-     * Initialize the ViewModel
+     * Initialize the ViewModel with better state management
      */
     private fun initialize() {
-        // Observe analysis service state
+        // Monitor model readiness
         viewModelScope.launch {
-            imageAnalysisService.analysisState.collect { state ->
-                Log.d(TAG, "Analysis service state changed: $state")
-                updateAnalysisState(state)
+            gemmaModelManager.modelState.collect { modelState ->
+                _uiState.update { it.copy(
+                    isModelReady = modelState == com.cautious5.crisis_coach.model.ai.ModelState.READY
+                )}
             }
         }
-    }
-
-    /**
-     * Update UI state based on analysis service state
-     */
-    private fun updateAnalysisState(state: AnalysisState) {
-        _uiState.value = _uiState.value.copy(
-            analysisState = state,
-            isAnalyzing = state == AnalysisState.ANALYZING,
-            analysisProgress = when (state) {
-                AnalysisState.IDLE -> 0f
-                AnalysisState.ANALYZING -> 0.5f // Indeterminate progress
-                AnalysisState.ERROR -> 0f
-            }
-        )
-    }
-
-    /**
-     * Set selected image from camera or gallery
-     */
-    fun setSelectedImage(bitmap: Bitmap, uri: Uri? = null) {
-        Log.d(TAG, "Setting selected image: ${bitmap.width}x${bitmap.height}")
-
-        try {
-            // Validate image
-            when (val validationResult = ImageUtils.validateImage(bitmap)) {
-                is ImageUtils.ValidationResult.Success -> {
-                    _uiState.value = _uiState.value.copy(
-                        selectedImage = bitmap,
-                        imageUri = uri,
-                        hasImage = true,
-                        analysisResult = null, // Clear previous result
-                        error = null
-                    )
-                    Log.d(TAG, "Image set successfully")
-                }
-                is ImageUtils.ValidationResult.Error -> {
-                    Log.e(TAG, "Image validation failed: ${validationResult.message}")
-                    setError("Invalid image: ${validationResult.message}")
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error setting image", e)
-            setError("Failed to process image: ${e.message}")
-        }
-    }
-
-    /**
-     * Load image from URI
-     */
-    fun loadImageFromUri(uri: Uri) {
-        Log.d(TAG, "Loading image from URI: $uri")
 
         viewModelScope.launch {
-            try {
-                val result = ImageUtils.loadAndPreprocessImage(
-                    context = getApplication(),
-                    uri = uri,
-                    config = ImageUtils.PreprocessConfig(correctOrientation = true)
-                )
+            gemmaModelManager.streamingText
+                .collect { streamingText ->
+                    val currentState = _uiState.value
 
-                if (result.isSuccess) {
-                    result.getOrNull()?.let { bitmap ->
-                        setSelectedImage(bitmap, uri)
-                    } ?: setError("Failed to retrieve image bitmap.")
-                } else {
-                    Log.e(TAG, "Failed to load image from URI", result.exceptionOrNull())
-                    setError("Failed to load image: ${result.exceptionOrNull()?.message}")
+                    if (currentState.isAnalyzing &&
+                        gemmaModelManager.isStreaming.value &&
+                        streamingText.isNotEmpty()) {
+
+                        if (!_streamingStarted.value) {
+                            _streamingStarted.value = true
+                            updateProgress(AnalysisProgress.StreamingResponse)
+                        }
+
+                        _uiState.update { it.copy(streamingAnalysis = streamingText) }
+                    }
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error loading image from URI", e)
-                setError("Error loading image: ${e.message}")
-            }
+        }
+
+        // Monitor streaming completion
+        viewModelScope.launch {
+            gemmaModelManager.isStreaming
+                .collect { isStreaming ->
+                    if (!isStreaming && _streamingStarted.value) {
+                        _streamingStarted.value = false
+                    }
+                }
         }
     }
 
     /**
-     * Set analysis type
-     */
-    fun setAnalysisType(type: AnalysisTypeOption) {
-        Log.d(TAG, "Setting analysis type: ${type.displayName}")
-        _uiState.value = _uiState.value.copy(
-            analysisType = type,
-            analysisResult = null // Clear previous result when changing type
-        )
-    }
-
-    /**
-     * Update custom question
-     */
-    fun updateCustomQuestion(question: String) {
-        _uiState.value = _uiState.value.copy(customQuestion = question)
-    }
-
-    /**
-     * Start image analysis
+     * Image analysis
      */
     fun analyzeImage() {
         val currentState = _uiState.value
         val image = currentState.selectedImage
 
         if (image == null) {
-            Log.w(TAG, "No image selected for analysis")
             setError("Please select an image first")
             return
         }
@@ -221,238 +229,349 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
 
-        Log.d(TAG, "Starting image analysis: ${currentState.analysisType.displayName}")
-        clearError()
+        if (!currentState.isModelReady) {
+            setError("AI model is not ready. Please wait...")
+            return
+        }
+
+        Log.d(TAG, "Delegating analysis to ImageAnalysisService for type: ${currentState.analysisType.displayName}")
+        Log.d(TAG, "Starting analysis: ${currentState.analysisType.displayName}")
 
         viewModelScope.launch {
             try {
-                when (currentState.analysisType) {
-                    AnalysisTypeOption.MEDICAL -> analyzeMedicalImage(image, currentState.customQuestion)
-                    AnalysisTypeOption.STRUCTURAL -> analyzeStructuralImage(image, currentState.customQuestion)
-                    AnalysisTypeOption.GENERAL -> analyzeGeneralImage(image, currentState.customQuestion)
+                // Show dialog and set initial state
+                _uiState.update { it.copy(
+                    isAnalyzing = true,
+                    streamingAnalysis = "",
+                    analysisResult = null,
+                    error = null,
+                    showProcessingDialog = true
+                )}
+
+                val analysisFlow = when (currentState.analysisType) {
+                    AnalysisTypeOption.MEDICAL -> imageAnalysisService.analyzeMedicalImageStreaming(
+                        image = image,
+                        specificQuestion = currentState.customQuestion.takeIf { it.isNotBlank() }
+                    )
+                    AnalysisTypeOption.STRUCTURAL -> imageAnalysisService.analyzeStructuralImageStreaming(
+                        image = image,
+                        specificConcerns = currentState.customQuestion.takeIf { it.isNotBlank() }
+                    )
+                    AnalysisTypeOption.GENERAL -> imageAnalysisService.analyzeGeneralImageStreaming(
+                        image = image,
+                        question = currentState.customQuestion.ifBlank {
+                            "Describe what you see in this image and provide any relevant safety or emergency advice."
+                        }
+                    )
                 }
+
+                // Collect the result from the service
+                analysisFlow.collect { result ->
+                    when (result) {
+                        is GenerationResult.Success -> {
+                            handleAnalysisSuccess(result, currentState.analysisType)
+                        }
+                        is GenerationResult.Error -> {
+                            handleAnalysisError(result)
+                        }
+                    }
+                }
+
             } catch (e: Exception) {
-                Log.e(TAG, "Analysis failed with exception", e)
-                setError("Analysis failed: ${e.message}")
+                Log.e(TAG, "Analysis failed", e)
+                handleAnalysisError(GenerationResult.Error("Analysis failed: ${e.message}", e))
             }
         }
     }
 
     /**
-     * Analyze medical image
+     * Handle successful analysis completion
      */
-    private suspend fun analyzeMedicalImage(image: Bitmap, customQuestion: String?) {
-        Log.d(TAG, "Performing medical analysis")
+    private suspend fun handleAnalysisSuccess(
+        result: GenerationResult.Success,
+        analysisType: AnalysisTypeOption
+    ) {
+        updateProgressAnimated(AnalysisProgress.FinalizingResults)
 
-        when (val result = imageAnalysisService.analyzeMedicalImage(
-            image = image,
-            specificQuestion = customQuestion?.takeIf { it.isNotBlank() },
-            patientContext = null
-        )) {
-            is MedicalAnalysisResult.Success -> {
-                Log.d(TAG, "Medical analysis completed successfully")
-                _uiState.value = _uiState.value.copy(
-                    analysisResult = AnalysisResult.Medical(
-                        assessment = result.assessment,
-                        urgencyLevel = result.urgencyLevel,
-                        recommendations = result.recommendations,
-                        requiresProfessionalCare = result.requiresProfessionalCare,
-                        confidenceLevel = result.confidenceLevel,
-                        analysisTimeMs = result.analysisTimeMs
-                    )
+        // Parse results
+        val analysisResult = parseResultForAnalysisType(
+            analysisType,
+            result.text,
+            result.inferenceTimeMs
+        )
+
+        // Small delay to show finalizing state
+        delay(200)
+
+        updateProgress(AnalysisProgress.Complete)
+
+        // Update final state
+        _uiState.update { it.copy(
+            analysisResult = analysisResult,
+            isAnalyzing = false,
+            streamingAnalysis = "",
+            confidence = ResponseParser.extractConfidence(result.text),
+            analysisTimeMs = result.inferenceTimeMs
+        )}
+    }
+
+    /**
+     * Handle analysis errors
+     */
+    private fun handleAnalysisError(error: GenerationResult.Error) {
+        _uiState.update { it.copy(
+            isAnalyzing = false,
+            streamingAnalysis = "",
+            analysisProgress = AnalysisProgress.Idle,
+            error = "Analysis failed: ${error.message}",
+            showProcessingDialog = false
+        )}
+    }
+
+    /**
+     * Update progress with animation delay
+     */
+    private suspend fun updateProgressAnimated(progress: AnalysisProgress) {
+        updateProgress(progress)
+        delay(PROGRESS_ANIMATION_DELAY)
+    }
+
+    /**
+     * Update progress state
+     */
+    private fun updateProgress(progress: AnalysisProgress) {
+        _uiState.update { it.copy(
+            analysisProgress = progress,
+            progressMessage = progress.message
+        )}
+    }
+
+    /**
+     * Build prompt based on analysis type
+     */
+    private fun buildPromptForAnalysisType(
+        analysisType: AnalysisTypeOption,
+        customQuestion: String
+    ): String {
+        return when (analysisType) {
+            AnalysisTypeOption.MEDICAL -> {
+                PromptUtils.buildMedicalAnalysisPrompt(
+                    specificQuestion = customQuestion.takeIf { it.isNotBlank() },
+                    patientContext = null
                 )
             }
-            is MedicalAnalysisResult.Error -> {
-                Log.e(TAG, "Medical analysis failed: ${result.message}")
-                setError("Medical analysis failed: ${result.message}")
-            }
-        }
-    }
-
-    /**
-     * Analyze structural image
-     */
-    private suspend fun analyzeStructuralImage(image: Bitmap, customQuestion: String?) {
-        Log.d(TAG, "Performing structural analysis")
-
-        when (val result = imageAnalysisService.analyzeStructuralImage(
-            image = image,
-            structureType = StructureType.UNKNOWN, // Let AI determine the type
-            specificConcerns = customQuestion?.takeIf { it.isNotBlank() }
-        )) {
-            is StructuralAnalysisResult.Success -> {
-                Log.d(TAG, "Structural analysis completed successfully")
-                _uiState.value = _uiState.value.copy(
-                    analysisResult = AnalysisResult.Structural(
-                        assessment = result.structureType.displayName + " analysis completed",
-                        safetyStatus = result.safetyStatus,
-                        identifiedIssues = result.identifiedIssues,
-                        immediateActions = result.immediateActions,
-                        confidenceLevel = result.confidenceLevel,
-                        analysisTimeMs = result.analysisTimeMs
-                    )
+            AnalysisTypeOption.STRUCTURAL -> {
+                PromptUtils.buildStructuralAnalysisPrompt(
+                    structureType = "structure",
+                    specificConcerns = customQuestion.takeIf { it.isNotBlank() }
                 )
             }
-            is StructuralAnalysisResult.Error -> {
-                Log.e(TAG, "Structural analysis failed: ${result.message}")
-                setError("Structural analysis failed: ${result.message}")
+            AnalysisTypeOption.GENERAL -> {
+                val question = customQuestion.ifBlank {
+                    "Describe what you see in this image and provide any relevant safety or emergency advice."
+                }
+                PromptUtils.buildGeneralImageAnalysisPrompt(question)
             }
         }
     }
 
     /**
-     * Analyze general image
+     * Parse result based on analysis type
      */
-    private suspend fun analyzeGeneralImage(image: Bitmap, customQuestion: String) {
-        Log.d(TAG, "Performing general analysis")
+    private fun parseResultForAnalysisType(
+        analysisType: AnalysisTypeOption,
+        resultText: String,
+        inferenceTime: Long
+    ): AnalysisResult {
+        val confidence = ResponseParser.extractConfidence(resultText)
 
-        val question = customQuestion.ifBlank {
-            "Describe what you see in this image and provide any relevant safety or emergency advice."
-        }
+        return when (analysisType) {
+            AnalysisTypeOption.MEDICAL -> {
+                val urgency = ResponseParser.extractUrgencyLevel(resultText)
+                val recommendations = ResponseParser.extractActionItems(resultText)
+                val keyFindings = ResponseParser.extractKeyFindings(resultText)
 
-        when (val result = imageAnalysisService.analyzeGeneralImage(image = image, question = question)) {
-            is GeneralAnalysisResult.Success -> {
-                Log.d(TAG, "General analysis completed successfully")
-                _uiState.value = _uiState.value.copy(
-                    analysisResult = AnalysisResult.General(
-                        description = result.description,
-                        keyObservations = result.keyObservations,
-                        suggestedActions = result.suggestedActions,
-                        confidence = result.confidenceLevel,
-                        analysisTimeMs = result.analysisTimeMs
-                    )
+                AnalysisResult.Medical(
+                    assessment = resultText,
+                    urgencyLevel = urgency,
+                    recommendations = recommendations,
+                    requiresProfessionalCare = urgency in listOf(
+                        ResponseParser.UrgencyLevel.CRITICAL,
+                        ResponseParser.UrgencyLevel.HIGH
+                    ),
+                    confidenceLevel = confidence,
+                    analysisTimeMs = inferenceTime,
+                    keyFindings = keyFindings
                 )
             }
-            is GeneralAnalysisResult.Error -> {
-                Log.e(TAG, "General analysis failed: ${result.message}")
-                setError("General analysis failed: ${result.message}")
+
+            AnalysisTypeOption.STRUCTURAL -> {
+                val safetyStatus = ResponseParser.extractSafetyStatus(resultText)
+                val issues = ResponseParser.extractKeyFindings(resultText)
+                val actions = ResponseParser.extractActionItems(resultText)
+
+                AnalysisResult.Structural(
+                    assessment = resultText,
+                    safetyStatus = safetyStatus,
+                    identifiedIssues = issues,
+                    immediateActions = actions,
+                    confidenceLevel = confidence,
+                    analysisTimeMs = inferenceTime,
+                    structureType = "Analyzed Structure",
+                    damageLevel = safetyStatus.name
+                )
+            }
+
+            AnalysisTypeOption.GENERAL -> {
+                val observations = ResponseParser.extractKeyFindings(resultText)
+                val actions = ResponseParser.extractActionItems(resultText)
+                val riskLevel = ResponseParser.extractRiskLevel(resultText)
+
+                AnalysisResult.General(
+                    description = resultText,
+                    keyObservations = observations,
+                    suggestedActions = actions,
+                    confidence = confidence,
+                    analysisTimeMs = inferenceTime,
+                    riskLevel = riskLevel.name.replace('_', ' '),
+                    safetyRecommendations = actions
+                )
             }
         }
     }
 
     /**
-     * Clear selected image and results
+     * Load image from URI with error handling
      */
+    fun loadImageFromUri(uri: Uri) {
+        Log.d(TAG, "Loading image from URI")
+
+        viewModelScope.launch {
+            try {
+                _uiState.update { it.copy(
+                    analysisProgress = AnalysisProgress.PreprocessingImage,
+                    progressMessage = "Loading image..."
+                )}
+
+                val result = withContext(Dispatchers.IO) {
+                    ImageUtils.loadAndPreprocessImage(
+                        context = getApplication(),
+                        uri = uri,
+                        config = ImageUtils.PreprocessConfig(correctOrientation = true)
+                    )
+                }
+
+                if (result.isSuccess) {
+                    result.getOrNull()?.let { bitmap ->
+                        setSelectedImage(bitmap, uri)
+                    } ?: setError("Failed to process image.")
+                } else {
+                    setError("Failed to load image: ${result.exceptionOrNull()?.message}")
+                }
+
+                _uiState.update { it.copy(
+                    analysisProgress = AnalysisProgress.Idle,
+                    progressMessage = ""
+                )}
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading image", e)
+                _uiState.update { it.copy(
+                    analysisProgress = AnalysisProgress.Idle,
+                    progressMessage = "",
+                    error = "Error loading image: ${e.message}"
+                )}
+            }
+        }
+    }
+
+    private fun setSelectedImage(bitmap: Bitmap, uri: Uri? = null) {
+        when (val validationResult = ImageUtils.validateImage(bitmap)) {
+            is ImageUtils.ValidationResult.Success -> {
+                _uiState.update { it.copy(
+                    selectedImage = bitmap,
+                    imageUri = uri,
+                    analysisResult = null,
+                    streamingAnalysis = "",
+                    error = null,
+                    analysisProgress = AnalysisProgress.Idle,
+                    progressMessage = ""
+                )}
+            }
+            is ImageUtils.ValidationResult.Error -> {
+                setError("Invalid image: ${validationResult.message}")
+            }
+        }
+    }
+
+    // UI action methods
+    fun setAnalysisType(type: AnalysisTypeOption) {
+        _uiState.update { it.copy(
+            analysisType = type,
+            analysisResult = null,
+            streamingAnalysis = "",
+            error = null
+        )}
+    }
+
+    fun updateCustomQuestion(question: String) {
+        _uiState.update { it.copy(customQuestion = question) }
+    }
+
     fun clearImage() {
-        Log.d(TAG, "Clearing selected image")
-        _uiState.value = _uiState.value.copy(
+        _uiState.value.selectedImage?.let {
+            ImageUtils.recycleBitmapIfNeeded(it)
+        }
+
+        _uiState.update { it.copy(
             selectedImage = null,
             imageUri = null,
-            hasImage = false,
             analysisResult = null,
+            streamingAnalysis = "",
             error = null,
-            customQuestion = ""
-        )
+            customQuestion = "",
+            analysisProgress = AnalysisProgress.Idle,
+            progressMessage = ""
+        )}
     }
 
-    /**
-     * Cancel ongoing analysis
-     */
     fun cancelAnalysis() {
         Log.d(TAG, "Cancelling analysis")
-        imageAnalysisService.cancelAnalysis()
-        _uiState.value = _uiState.value.copy(
+        gemmaModelManager.cancelGeneration()
+        _streamingStarted.value = false
+
+        _uiState.update { it.copy(
             isAnalyzing = false,
-            analysisProgress = 0f
-        )
+            analysisProgress = AnalysisProgress.Idle,
+            streamingAnalysis = "",
+            progressMessage = "Analysis cancelled"
+        )}
     }
 
-    /**
-     * Show image picker dialog
-     */
     fun showImagePicker() {
-        _uiState.value = _uiState.value.copy(showImagePicker = true)
+        _uiState.update { it.copy(showImagePicker = true) }
     }
 
-    /**
-     * Hide image picker dialog
-     */
     fun hideImagePicker() {
-        _uiState.value = _uiState.value.copy(showImagePicker = false)
+        _uiState.update { it.copy(showImagePicker = false) }
     }
 
-    /**
-     * Show camera capture
-     */
-    fun showCameraCapture() {
-        _uiState.value = _uiState.value.copy(showCameraCapture = true)
-    }
-
-    /**
-     * Hide camera capture
-     */
-    fun hideCameraCapture() {
-        _uiState.value = _uiState.value.copy(showCameraCapture = false)
-    }
-
-    /**
-     * Get urgency color for medical results
-     */
-    fun getUrgencyColor(urgencyLevel: ResponseParser.UrgencyLevel): androidx.compose.ui.graphics.Color {
-        return when (urgencyLevel) {
-            ResponseParser.UrgencyLevel.CRITICAL -> androidx.compose.ui.graphics.Color.Red
-            ResponseParser.UrgencyLevel.HIGH -> androidx.compose.ui.graphics.Color(0xFFFF6B00) // Orange
-            ResponseParser.UrgencyLevel.MEDIUM -> androidx.compose.ui.graphics.Color(0xFFFFCC00) // Yellow
-            ResponseParser.UrgencyLevel.LOW -> androidx.compose.ui.graphics.Color.Green
-            ResponseParser.UrgencyLevel.UNKNOWN -> androidx.compose.ui.graphics.Color.Gray
-        }
-    }
-
-    /**
-     * Get safety color for structural results
-     */
-    fun getSafetyColor(safetyStatus: ResponseParser.SafetyStatus): androidx.compose.ui.graphics.Color {
-        return when (safetyStatus) {
-            ResponseParser.SafetyStatus.CRITICAL -> androidx.compose.ui.graphics.Color.Red
-            ResponseParser.SafetyStatus.UNSAFE -> androidx.compose.ui.graphics.Color(0xFFFF6B00) // Orange
-            ResponseParser.SafetyStatus.CAUTION -> androidx.compose.ui.graphics.Color(0xFFFFCC00) // Yellow
-            ResponseParser.SafetyStatus.SAFE -> androidx.compose.ui.graphics.Color.Green
-            ResponseParser.SafetyStatus.UNKNOWN -> androidx.compose.ui.graphics.Color.Gray
-        }
-    }
-
-    /**
-     * Get urgency/safety level display text
-     */
-    fun getLevelDisplayText(level: Any): String {
-        return when (level) {
-            is ResponseParser.UrgencyLevel -> level.name.lowercase().replaceFirstChar { it.uppercase() }
-            is ResponseParser.SafetyStatus -> level.name.lowercase().replaceFirstChar { it.uppercase() }
-            else -> "Unknown"
-        }
-    }
-
-    /**
-     * Set error message
-     */
     private fun setError(message: String) {
-        _uiState.value = _uiState.value.copy(error = message)
+        _uiState.update { it.copy(
+            error = message,
+            isAnalyzing = false,
+            analysisProgress = AnalysisProgress.Idle
+        )}
     }
 
-    /**
-     * Clear error message
-     */
     fun clearError() {
-        _uiState.value = _uiState.value.copy(error = null)
-    }
-
-    /**
-     * Get estimated memory usage of current image
-     */
-    fun getImageMemoryUsage(): String {
-        val image = _uiState.value.selectedImage ?: return "0 MB"
-        val memoryBytes = ImageUtils.estimateBitmapMemory(image)
-        val memoryMB = memoryBytes / (1024 * 1024)
-        return "$memoryMB MB"
+        _uiState.update { it.copy(error = null) }
     }
 
     override fun onCleared() {
         super.onCleared()
         Log.d(TAG, "ImageTriageViewModel cleared")
-
-        // Clean up image resources
-        _uiState.value.selectedImage?.let { bitmap ->
-            ImageUtils.recycleBitmapIfNeeded(bitmap)
+        _uiState.value.selectedImage?.let {
+            ImageUtils.recycleBitmapIfNeeded(it)
         }
     }
 }

@@ -91,7 +91,7 @@ object PromptUtils {
 
             appendLine("Please analyze this medical image and provide:")
             appendLine("1. A clear assessment of what you observe")
-            appendLine("2. The urgency level (Critical, High, Medium, Low)")
+            appendLine("2. The urgency level, choose only one (Critical, High, Medium, Low)")
             appendLine("3. Immediate care recommendations")
             appendLine("4. Whether professional medical care is required")
 

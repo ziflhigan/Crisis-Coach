@@ -43,10 +43,41 @@ object ResponseParser {
     }
 
     /**
+     * Extracts risk level from a general analysis response.
+     * Prioritizes searching within a "Risk Level" section if available.
+     */
+    fun extractRiskLevel(response: String): RiskLevel {
+        val sections = extractSections(response)
+        val textToSearch = sections["risk level"]
+            ?: sections["risk"]
+            ?: response.lowercase()
+
+        val lowercaseResponse = textToSearch.lowercase()
+
+        return when {
+            containsAny(lowercaseResponse, "critical risk", "imminent danger", "extreme risk", "evacuate") ->
+                RiskLevel.CRITICAL
+            containsAny(lowercaseResponse, "high risk", "significant danger", "urgent attention") ->
+                RiskLevel.HIGH
+            containsAny(lowercaseResponse, "moderate risk", "medium risk", "potential hazard", "caution") ->
+                RiskLevel.MODERATE
+            containsAny(lowercaseResponse, "low risk", "minor concern", "be mindful") ->
+                RiskLevel.LOW
+            else -> RiskLevel.UNKNOWN
+        }
+    }
+
+    /**
      * Extracts urgency level from medical response
      */
     fun extractUrgencyLevel(response: String): UrgencyLevel {
-        val lowercaseResponse = response.lowercase()
+        val sections = extractSections(response)
+        // Search in the most relevant section first, then fall back to the whole response
+        val textToSearch = sections["urgency level"]
+            ?: sections["urgency"]
+            ?: response.lowercase()
+
+        val lowercaseResponse = textToSearch.lowercase()
 
         return when {
             containsAny(lowercaseResponse, "critical", "life-threatening", "immediate", "emergency") ->
@@ -62,10 +93,16 @@ object ResponseParser {
     }
 
     /**
-     * Extracts safety status from structural response
+     * Extracts safety status from structural response.
+     * Prioritizes searching within a "Safety Status" section.
      */
     fun extractSafetyStatus(response: String): SafetyStatus {
-        val lowercaseResponse = response.lowercase()
+        val sections = extractSections(response)
+        val textToSearch = sections["safety status"]
+            ?: sections["safety"]
+            ?: response.lowercase()
+
+        val lowercaseResponse = textToSearch.lowercase()
 
         return when {
             containsAny(lowercaseResponse, "critical", "collapse", "imminent danger", "evacuate immediately") ->
@@ -81,65 +118,59 @@ object ResponseParser {
     }
 
     /**
-     * Extracts action items from response
+     * Extracts action items or recommendations from the response.
+     * Prefers looking in "Recommendations" or "Actions" sections.
      */
     fun extractActionItems(response: String): List<String> {
-        val actionIndicators = listOf(
-            "should", "must", "need to", "recommend", "advise",
-            "immediately", "first", "then", "next", "finally"
-        )
+        val sections = extractSections(response)
+        val textToSearch = sections["recommendations"]
+            ?: sections["recommended actions"]
+            ?: sections["actions"]
+            ?: response // Fallback to whole response
 
-        return response.split(Regex("[.!]"))
-            .map { it.trim() }
-            .filter { sentence ->
-                actionIndicators.any { indicator ->
-                    sentence.lowercase().contains(indicator)
-                }
-            }
-            .take(5) // Limit to top 5 actions
+        return extractListItems(textToSearch).ifEmpty {
+            // Fallback for non-list format
+            textToSearch.split(Regex("[.!]"))
+                .map { it.trim() }
+                .filter { it.length > 15 } // Basic filter for sentence-like items
+        }.take(5)
     }
 
     /**
-     * Extracts key observations or findings
+     * Extracts key observations or findings from the response.
+     * Prefers looking in "Key Findings" or "Assessment" sections.
      */
     fun extractKeyFindings(response: String, maxFindings: Int = 5): List<String> {
-        val findingIndicators = listOf(
-            "observe", "see", "notice", "appears", "shows",
-            "indicates", "suggests", "reveals", "displays"
-        )
+        val sections = extractSections(response)
+        val textToSearch = sections["key findings"]
+            ?: sections["observations"]
+            ?: sections["assessment"]
+            ?: response
 
-        return response.split(Regex("[.!]"))
-            .map { it.trim() }
-            .filter { sentence ->
-                sentence.length > 20 && // Skip very short sentences
-                        findingIndicators.any { indicator ->
-                            sentence.lowercase().contains(indicator)
-                        }
-            }
-            .take(maxFindings)
+        return extractListItems(textToSearch).ifEmpty {
+            textToSearch.split(Regex("[.!]"))
+                .map { it.trim() }
+                .filter { it.length > 15 }
+        }.take(maxFindings)
     }
 
     /**
-     * Extracts numbered or bulleted lists from response
+     * Extracts numbered or bulleted lists from a given text block.
+     * This is a powerful helper for structured data.
      */
-    fun extractListItems(response: String): List<String> {
+    fun extractListItems(text: String): List<String> {
         val items = mutableListOf<String>()
 
-        // Extract numbered lists (1., 2., etc.)
-        val numberedPattern = Regex("\\d+\\.\\s*(.+?)(?=\\d+\\.|$)", RegexOption.DOT_MATCHES_ALL)
-        numberedPattern.findAll(response).forEach { match ->
-            items.add(match.groupValues[1].trim())
-        }
+        // Match numbered lists (e.g., "1. Do this") and bulleted lists (e.g., "- Do that")
+        val listPattern = Regex("^[\\s*]*([\\d]+[.)]|[*-•])\\s+(.*)", RegexOption.MULTILINE)
 
-        // Extract bulleted lists (-, *, •)
-        val bulletPattern = Regex("[-*•]\\s*(.+?)(?=[-*•]|\\n|$)")
-        bulletPattern.findAll(response).forEach { match ->
-            val item = match.groupValues[1].trim()
-            if (item.isNotBlank()) {
+        listPattern.findAll(text).forEach { matchResult ->
+            // The actual content is in the second capturing group
+            val item = matchResult.groupValues[2].trim()
+            if (item.isNotEmpty()) {
                 items.add(item)
             }
         }
-
         return items.distinct()
     }
 
@@ -187,42 +218,50 @@ object ResponseParser {
     }
 
     /**
-     * Splits response into sections based on headers
+     * Splits response into sections based on headers like "Section:".
      */
-    fun extractSections(response: String): Map<String, String> {
+    private fun extractSections(response: String): Map<String, String> {
         val sections = mutableMapOf<String, String>()
-        val lines = response.lines()
+        // Handles optional numbers, periods, and spaces before the header text.
+        val headerPattern = Regex("""^\s*(?:\d+\.\s*)?([A-Za-z\s]+):""", RegexOption.MULTILINE)
+        val matches = headerPattern.findAll(response).toList()
 
-        var currentSection = "main"
-        val currentContent = StringBuilder()
+        if (matches.isEmpty()) {
+            // If no headers are found, treat the whole text as the primary content
+            // to allow keyword search as a last resort.
+            sections["assessment"] = response
+            return sections
+        }
 
-        for (line in lines) {
-            // Detect section headers (e.g., "Assessment:", "Recommendations:", etc.)
-            val headerMatch = Regex("^([A-Za-z\\s]+):").find(line)
-
-            if (headerMatch != null) {
-                // Save previous section
-                if (currentContent.isNotEmpty()) {
-                    sections[currentSection] = currentContent.toString().trim()
-                    currentContent.clear()
-                }
-
-                currentSection = headerMatch.groupValues[1].trim().lowercase()
-                // Add the rest of the line after the colon
-                val remainder = line.substring(headerMatch.value.length).trim()
-                if (remainder.isNotEmpty()) {
-                    currentContent.appendLine(remainder)
-                }
-            } else {
-                currentContent.appendLine(line)
+        // Handle any text that might appear before the very first header
+        val firstMatch = matches.first()
+        if (firstMatch.range.first > 0) {
+            val preamble = response.substring(0, firstMatch.range.first).trim()
+            if (preamble.isNotEmpty()) {
+                sections["preamble"] = preamble
             }
         }
 
-        // Save last section
-        if (currentContent.isNotEmpty()) {
-            sections[currentSection] = currentContent.toString().trim()
+        // Iterate through all found headers to carve up the text
+        matches.forEachIndexed { index, matchResult ->
+            // The header text (e.g., "Urgency Level") is in the first capturing group
+            val header = matchResult.groupValues[1].trim().lowercase()
+            val contentStart = matchResult.range.last + 1
+
+            // The content for this section ends where the next header begins, or at the end of the string
+            val contentEnd = if (index + 1 < matches.size) {
+                matches[index + 1].range.first
+            } else {
+                response.length
+            }
+
+            val content = response.substring(contentStart, contentEnd).trim()
+            if (content.isNotEmpty()) {
+                sections[header] = content
+            }
         }
 
+        Log.d(TAG, "Extracted sections: ${sections.keys.joinToString()}")
         return sections
     }
 
@@ -269,6 +308,14 @@ object ResponseParser {
         CAUTION,
         UNSAFE,
         CRITICAL,
+        UNKNOWN
+    }
+
+    enum class RiskLevel {
+        CRITICAL,
+        HIGH,
+        MODERATE,
+        LOW,
         UNKNOWN
     }
 }

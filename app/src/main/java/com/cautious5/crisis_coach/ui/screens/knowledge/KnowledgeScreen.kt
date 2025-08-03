@@ -603,7 +603,7 @@ private fun AnimatedStreamingCursor(isVisible: Boolean) {
     }
 
     Text(
-        text = if (showCursor && isVisible) "▋" else " ",
+        text = if (showCursor && isVisible) "|" else " ",
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.primary
     )

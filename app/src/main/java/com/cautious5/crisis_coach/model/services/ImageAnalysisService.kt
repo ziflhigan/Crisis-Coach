@@ -9,6 +9,7 @@ import com.cautious5.crisis_coach.utils.ImageUtils
 import com.cautious5.crisis_coach.utils.PromptUtils
 import com.cautious5.crisis_coach.utils.ResponseParser
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,116 +35,48 @@ class ImageAnalysisService(
     private val _analysisState = MutableStateFlow(AnalysisState.IDLE)
     val analysisState: StateFlow<AnalysisState> = _analysisState.asStateFlow()
 
-    suspend fun analyzeMedicalImage(
+    /**
+     * Analyzes a medical image and streams the response.
+     * @return A Flow that emits the final GenerationResult upon completion.
+     */
+    fun analyzeMedicalImageStreaming(
         image: Bitmap,
         specificQuestion: String? = null,
         patientContext: String? = null
-    ): MedicalAnalysisResult = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Starting medical image analysis")
-        _analysisState.value = AnalysisState.ANALYZING
-
-        val processedImage = ImageUtils.preprocessBitmap(image)
-        // Build prompt using centralized utility
+    ): Flow<GenerationResult> {
+        Log.d(TAG, "Starting streaming medical image analysis")
         val prompt = PromptUtils.buildMedicalAnalysisPrompt(specificQuestion, patientContext)
-
-        when (val analysisResult = performImageAnalysis(processedImage, prompt)) {
-            is ImageAnalysisResult.Success -> {
-                Log.d(TAG, "Parsing medical response.")
-                // Parse response using centralized utility
-                val assessment = analysisResult.analysis
-                val urgency = ResponseParser.extractUrgencyLevel(assessment)
-                val recommendations = ResponseParser.extractActionItems(assessment)
-
-                _analysisState.value = AnalysisState.IDLE
-                MedicalAnalysisResult.Success(
-                    assessment = assessment,
-                    urgencyLevel = urgency,
-                    recommendations = recommendations,
-                    requiresProfessionalCare = urgency in listOf(ResponseParser.UrgencyLevel.CRITICAL, ResponseParser.UrgencyLevel.HIGH),
-                    confidenceLevel = analysisResult.confidence,
-                    analysisTimeMs = analysisResult.analysisTimeMs
-                )
-            }
-            is ImageAnalysisResult.Error -> {
-                _analysisState.value = AnalysisState.IDLE
-                MedicalAnalysisResult.Error(analysisResult.message, analysisResult.cause)
-            }
-        }
-    }
-
-    suspend fun analyzeStructuralImage(
-        image: Bitmap,
-        structureType: StructureType = StructureType.UNKNOWN,
-        specificConcerns: String? = null
-    ): StructuralAnalysisResult = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Starting structural image analysis for: $structureType")
-        _analysisState.value = AnalysisState.ANALYZING
-
         val processedImage = ImageUtils.preprocessBitmap(image)
-        // Build prompt using centralized utility
-        val prompt = PromptUtils.buildStructuralAnalysisPrompt(structureType.displayName, specificConcerns)
-
-        when (val analysisResult = performImageAnalysis(processedImage, prompt)) {
-            is ImageAnalysisResult.Success -> {
-                Log.d(TAG, "Parsing structural response.")
-                // Parse response using centralized utility
-                val assessment = analysisResult.analysis
-                val safetyStatus = ResponseParser.extractSafetyStatus(assessment)
-                val issues = ResponseParser.extractKeyFindings(assessment)
-                val actions = ResponseParser.extractActionItems(assessment)
-
-                _analysisState.value = AnalysisState.IDLE
-                StructuralAnalysisResult.Success(
-                    structureType = structureType,
-                    damageLevel = DamageLevel.UNKNOWN, // Let parser handle this if needed, or simplify
-                    safetyStatus = safetyStatus,
-                    identifiedIssues = issues,
-                    immediateActions = actions,
-                    confidenceLevel = analysisResult.confidence,
-                    analysisTimeMs = analysisResult.analysisTimeMs
-                )
-            }
-            is ImageAnalysisResult.Error -> {
-                _analysisState.value = AnalysisState.IDLE
-                StructuralAnalysisResult.Error(analysisResult.message, analysisResult.cause)
-            }
-        }
+        return gemmaModelManager.generateFromImageWithRealtimeUpdates(processedImage, prompt)
     }
 
     /**
-     * Analyzes an image for general purposes, providing observations and safety advice.
+     * Analyzes a structural image and streams the response.
+     * @return A Flow that emits the final GenerationResult upon completion.
      */
-    suspend fun analyzeGeneralImage(
+    fun analyzeStructuralImageStreaming(
+        image: Bitmap,
+        structureType: StructureType = StructureType.UNKNOWN,
+        specificConcerns: String? = null
+    ): Flow<GenerationResult> {
+        Log.d(TAG, "Starting streaming structural image analysis for: $structureType")
+        val prompt = PromptUtils.buildStructuralAnalysisPrompt(structureType.displayName, specificConcerns)
+        val processedImage = ImageUtils.preprocessBitmap(image)
+        return gemmaModelManager.generateFromImageWithRealtimeUpdates(processedImage, prompt)
+    }
+
+    /**
+     * Analyzes a general image and streams the response.
+     * @return A Flow that emits the final GenerationResult upon completion.
+     */
+    fun analyzeGeneralImageStreaming(
         image: Bitmap,
         question: String
-    ): GeneralAnalysisResult = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Starting general image analysis")
-        _analysisState.value = AnalysisState.ANALYZING
-
-        val processedImage = ImageUtils.preprocessBitmap(image)
+    ): Flow<GenerationResult> {
+        Log.d(TAG, "Starting streaming general image analysis")
         val prompt = PromptUtils.buildGeneralImageAnalysisPrompt(question)
-
-        when (val analysisResult = performImageAnalysis(processedImage, prompt)) {
-            is ImageAnalysisResult.Success -> {
-                Log.d(TAG, "Parsing general response.")
-                val analysis = analysisResult.analysis
-                val observations = ResponseParser.extractKeyFindings(analysis)
-                val actions = ResponseParser.extractActionItems(analysis)
-
-                _analysisState.value = AnalysisState.IDLE
-                GeneralAnalysisResult.Success(
-                    description = analysis,
-                    keyObservations = observations,
-                    suggestedActions = actions,
-                    confidenceLevel = analysisResult.confidence,
-                    analysisTimeMs = analysisResult.analysisTimeMs
-                )
-            }
-            is ImageAnalysisResult.Error -> {
-                _analysisState.value = AnalysisState.IDLE
-                GeneralAnalysisResult.Error(analysisResult.message, analysisResult.cause)
-            }
-        }
+        val processedImage = ImageUtils.preprocessBitmap(image)
+        return gemmaModelManager.generateFromImageWithRealtimeUpdates(processedImage, prompt)
     }
 
     private suspend fun performImageAnalysis(
