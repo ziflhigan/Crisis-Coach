@@ -5,6 +5,8 @@ browser = "1.8.0"
 cameraCore = "1.4.2"
 cameraViewfinder = "1.4.0-alpha07"
 coilCompose = "2.6.0"
+commonmark = "0.21.0"
+commonmarkExtGfmTables = "0.21.0"
 coreSplashscreen = "1.2.0-rc01"
 fontawesomecompose = "1.0.0"
 gson = "2.11.0"
@@ -48,6 +50,8 @@ androidx-navigation-compose = { module = "androidx.navigation:navigation-compose
 androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "securityCrypto" }
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workRuntimeKtx" }
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coilCompose" }
+commonmark = { module = "org.commonmark:commonmark", version.ref = "commonmark" }
+commonmark-ext-gfm-tables = { module = "org.commonmark:commonmark-ext-gfm-tables", version.ref = "commonmarkExtGfmTables" }
 fontawesomecompose = { module = "com.github.Gurupreet:FontAwesomeCompose", version.ref = "fontawesomecompose" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
 icons-lucide-android = { module = "com.composables:icons-lucide-android", version.ref = "iconsLucideAndroid" }

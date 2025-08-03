@@ -118,4 +118,7 @@ dependencies {
 
     implementation(libs.itext7.core.android)
     implementation(libs.slf4j.android)
+
+    implementation(libs.commonmark)
+    implementation(libs.commonmark.ext.gfm.tables)
 }
