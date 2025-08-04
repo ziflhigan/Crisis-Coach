@@ -3,6 +3,16 @@ package com.cautious5.crisis_coach.utils
 import android.util.Log
 
 /**
+ * A private helper extension function to sanitize strings by removing common
+ * Markdown formatting and normalizing whitespace before parsing.
+ */
+private fun String.sanitise(): String =
+    replace(Regex("""[*_`~>\-•]+"""), " ") // Remove markdown, bullets
+        .replace(Regex("""\s+"""), " ")      // Collapse whitespace
+        .trim()
+        .lowercase()
+
+/**
  * Centralized utilities for parsing AI model responses
  * Extracts structured information from free-form text
  */
@@ -50,9 +60,9 @@ object ResponseParser {
         val sections = extractSections(response)
         val textToSearch = sections["risk level"]
             ?: sections["risk"]
-            ?: response.lowercase()
+            ?: response
 
-        val lowercaseResponse = textToSearch.lowercase()
+        val lowercaseResponse = textToSearch.sanitise() // Use sanitise for robustness
 
         return when {
             containsAny(lowercaseResponse, "critical risk", "imminent danger", "extreme risk", "evacuate") ->
@@ -68,29 +78,51 @@ object ResponseParser {
     }
 
     /**
-     * Extracts urgency level from medical response
+     * Extracts urgency level from medical response using a robust, multi-stage approach.
      */
     fun extractUrgencyLevel(response: String): UrgencyLevel {
         val sections = extractSections(response)
-        // Search in the most relevant section first, then fall back to the whole response
-        val textToSearch = sections["urgency level"]
-            ?: sections["urgency"]
-            ?: response.lowercase()
+        val rawSection = sections["urgency level"] ?: sections["urgency"]
 
-        val lowercaseResponse = textToSearch.lowercase()
+        // 1. Look inside an explicit section
+        if (rawSection != null) {
+            val cleaned = rawSection.sanitise()
+            // Direct match on the first word of the cleaned section
+            when (cleaned.split(" ").first()) {
+                "critical" -> return UrgencyLevel.CRITICAL
+                "high" -> return UrgencyLevel.HIGH
+                "medium", "moderate" -> return UrgencyLevel.MEDIUM
+                "low" -> return UrgencyLevel.LOW
+            }
+        }
 
+        // 2. Look for inline patterns with tolerant delimiters
+        val sanitizedResponse = response.sanitise()
+        val inline = Regex(
+            """urgency(?: level)?\s*[:=\-]?\s*(critical|high|medium|moderate|low)""",
+            RegexOption.IGNORE_CASE
+        ).find(sanitizedResponse)
+
+        if (inline != null) {
+            return when (inline.groupValues[1].lowercase()) {
+                "critical" -> UrgencyLevel.CRITICAL
+                "high" -> UrgencyLevel.HIGH
+                "medium", "moderate" -> UrgencyLevel.MEDIUM
+                "low" -> UrgencyLevel.LOW
+                else -> UrgencyLevel.UNKNOWN
+            }
+        }
+
+        // 3. Fallback to a simple phrase search on the sanitized response
         return when {
-            containsAny(lowercaseResponse, "critical", "life-threatening", "immediate", "emergency") ->
-                UrgencyLevel.CRITICAL
-            containsAny(lowercaseResponse, "high urgency", "urgent", "serious", "severe") ->
-                UrgencyLevel.HIGH
-            containsAny(lowercaseResponse, "moderate", "medium urgency", "concerning") ->
-                UrgencyLevel.MEDIUM
-            containsAny(lowercaseResponse, "low urgency", "minor", "non-urgent") ->
-                UrgencyLevel.LOW
+            sanitizedResponse.contains("low urgency") -> UrgencyLevel.LOW
+            sanitizedResponse.contains("moderate urgency") -> UrgencyLevel.MEDIUM
+            sanitizedResponse.contains("high urgency") -> UrgencyLevel.HIGH
+            sanitizedResponse.contains("critical urgency") -> UrgencyLevel.CRITICAL
             else -> UrgencyLevel.UNKNOWN
         }
     }
+
 
     /**
      * Extracts safety status from structural response.
@@ -100,9 +132,9 @@ object ResponseParser {
         val sections = extractSections(response)
         val textToSearch = sections["safety status"]
             ?: sections["safety"]
-            ?: response.lowercase()
+            ?: response
 
-        val lowercaseResponse = textToSearch.lowercase()
+        val lowercaseResponse = textToSearch.sanitise() // Use sanitise for robustness
 
         return when {
             containsAny(lowercaseResponse, "critical", "collapse", "imminent danger", "evacuate immediately") ->
@@ -115,63 +147,6 @@ object ResponseParser {
                 SafetyStatus.SAFE
             else -> SafetyStatus.UNKNOWN
         }
-    }
-
-    /**
-     * Extracts action items or recommendations from the response.
-     * Prefers looking in "Recommendations" or "Actions" sections.
-     */
-    fun extractActionItems(response: String): List<String> {
-        val sections = extractSections(response)
-        val textToSearch = sections["recommendations"]
-            ?: sections["recommended actions"]
-            ?: sections["actions"]
-            ?: response // Fallback to whole response
-
-        return extractListItems(textToSearch).ifEmpty {
-            // Fallback for non-list format
-            textToSearch.split(Regex("[.!]"))
-                .map { it.trim() }
-                .filter { it.length > 15 } // Basic filter for sentence-like items
-        }.take(5)
-    }
-
-    /**
-     * Extracts key observations or findings from the response.
-     * Prefers looking in "Key Findings" or "Assessment" sections.
-     */
-    fun extractKeyFindings(response: String, maxFindings: Int = 5): List<String> {
-        val sections = extractSections(response)
-        val textToSearch = sections["key findings"]
-            ?: sections["observations"]
-            ?: sections["assessment"]
-            ?: response
-
-        return extractListItems(textToSearch).ifEmpty {
-            textToSearch.split(Regex("[.!]"))
-                .map { it.trim() }
-                .filter { it.length > 15 }
-        }.take(maxFindings)
-    }
-
-    /**
-     * Extracts numbered or bulleted lists from a given text block.
-     * This is a powerful helper for structured data.
-     */
-    fun extractListItems(text: String): List<String> {
-        val items = mutableListOf<String>()
-
-        // Match numbered lists (e.g., "1. Do this") and bulleted lists (e.g., "- Do that")
-        val listPattern = Regex("^[\\s*]*([\\d]+[.)]|[*-•])\\s+(.*)", RegexOption.MULTILINE)
-
-        listPattern.findAll(text).forEach { matchResult ->
-            // The actual content is in the second capturing group
-            val item = matchResult.groupValues[2].trim()
-            if (item.isNotEmpty()) {
-                items.add(item)
-            }
-        }
-        return items.distinct()
     }
 
     /**
@@ -289,7 +264,7 @@ object ResponseParser {
     }
 
     private fun containsAny(text: String, vararg keywords: String): Boolean {
-        return keywords.any { text.contains(it) }
+        return keywords.any { text.contains(it, ignoreCase = true) }
     }
 
     /**
