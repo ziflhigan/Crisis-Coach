@@ -18,7 +18,6 @@ import com.cautious5.crisis_coach.model.services.ImageAnalysisService
 import com.cautious5.crisis_coach.utils.Constants.LogTags
 import com.cautious5.crisis_coach.utils.Constants.AnalysisTypes
 import com.cautious5.crisis_coach.utils.ImageUtils
-import com.cautious5.crisis_coach.utils.PromptUtils
 import com.cautious5.crisis_coach.utils.ResponseParser
 
 /**
@@ -92,18 +91,14 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
         data class Medical(
             val assessment: String,
             val urgencyLevel: ResponseParser.UrgencyLevel,
-            val recommendations: List<String>,
             val requiresProfessionalCare: Boolean,
             val confidenceLevel: Float,
             val analysisTimeMs: Long,
-            val keyFindings: List<String> = emptyList()
         ) : AnalysisResult()
 
         data class Structural(
             val assessment: String,
             val safetyStatus: ResponseParser.SafetyStatus,
-            val identifiedIssues: List<String>,
-            val immediateActions: List<String>,
             val confidenceLevel: Float,
             val analysisTimeMs: Long,
             val structureType: String = "Unknown",
@@ -112,12 +107,9 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
 
         data class General(
             val description: String,
-            val keyObservations: List<String>,
-            val suggestedActions: List<String>,
             val confidence: Float,
             val analysisTimeMs: Long,
             val riskLevel: String = "Unknown",
-            val safetyRecommendations: List<String> = emptyList()
         ) : AnalysisResult()
     }
 
@@ -139,7 +131,6 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
         val analysisTimeMs: Long = 0L,
         val progressMessage: String = "",
         val isModelReady: Boolean = false,
-        val showProcessingDialog: Boolean = false
     ) {
         val hasImage: Boolean get() = selectedImage != null
         val isBusy: Boolean get() = isAnalyzing
@@ -158,15 +149,6 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
     init {
         Log.d(TAG, "ImageTriageViewModel initialized")
         initialize()
-
-        viewModelScope.launch {
-            gemmaModelManager.streamingText
-                .collect { streamingText ->
-                    if (streamingText.isNotEmpty() && _uiState.value.showProcessingDialog) {
-                        _uiState.update { it.copy(showProcessingDialog = false) }
-                    }
-                }
-        }
     }
 
     /**
@@ -234,20 +216,19 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
 
-        Log.d(TAG, "Delegating analysis to ImageAnalysisService for type: ${currentState.analysisType.displayName}")
         Log.d(TAG, "Starting analysis: ${currentState.analysisType.displayName}")
 
-        viewModelScope.launch {
-            try {
-                // Show dialog and set initial state
-                _uiState.update { it.copy(
-                    isAnalyzing = true,
-                    streamingAnalysis = "",
-                    analysisResult = null,
-                    error = null,
-                    showProcessingDialog = true
-                )}
+        // Update UI state immediately on main thread
+        _uiState.update { it.copy(
+            isAnalyzing = true,
+            streamingAnalysis = "",
+            analysisResult = null,
+            error = null
+        )}
 
+        // Launch coroutine on IO dispatcher for background work
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
                 val analysisFlow = when (currentState.analysisType) {
                     AnalysisTypeOption.MEDICAL -> imageAnalysisService.analyzeMedicalImageStreaming(
                         image = image,
@@ -265,8 +246,8 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
                     )
                 }
 
-                // Collect the result from the service
-                analysisFlow.collect { result ->
+                // Collect results on IO thread, update UI state (StateFlow is thread-safe)
+                analysisFlow.collectLatest { result ->
                     when (result) {
                         is GenerationResult.Success -> {
                             handleAnalysisSuccess(result, currentState.analysisType)
@@ -323,8 +304,7 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
             isAnalyzing = false,
             streamingAnalysis = "",
             analysisProgress = AnalysisProgress.Idle,
-            error = "Analysis failed: ${error.message}",
-            showProcessingDialog = false
+            error = "Analysis failed: ${error.message}"
         )}
     }
 
@@ -347,35 +327,6 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     /**
-     * Build prompt based on analysis type
-     */
-    private fun buildPromptForAnalysisType(
-        analysisType: AnalysisTypeOption,
-        customQuestion: String
-    ): String {
-        return when (analysisType) {
-            AnalysisTypeOption.MEDICAL -> {
-                PromptUtils.buildMedicalAnalysisPrompt(
-                    specificQuestion = customQuestion.takeIf { it.isNotBlank() },
-                    patientContext = null
-                )
-            }
-            AnalysisTypeOption.STRUCTURAL -> {
-                PromptUtils.buildStructuralAnalysisPrompt(
-                    structureType = "structure",
-                    specificConcerns = customQuestion.takeIf { it.isNotBlank() }
-                )
-            }
-            AnalysisTypeOption.GENERAL -> {
-                val question = customQuestion.ifBlank {
-                    "Describe what you see in this image and provide any relevant safety or emergency advice."
-                }
-                PromptUtils.buildGeneralImageAnalysisPrompt(question)
-            }
-        }
-    }
-
-    /**
      * Parse result based on analysis type
      */
     private fun parseResultForAnalysisType(
@@ -388,33 +339,25 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
         return when (analysisType) {
             AnalysisTypeOption.MEDICAL -> {
                 val urgency = ResponseParser.extractUrgencyLevel(resultText)
-                val recommendations = ResponseParser.extractActionItems(resultText)
-                val keyFindings = ResponseParser.extractKeyFindings(resultText)
 
                 AnalysisResult.Medical(
                     assessment = resultText,
                     urgencyLevel = urgency,
-                    recommendations = recommendations,
                     requiresProfessionalCare = urgency in listOf(
                         ResponseParser.UrgencyLevel.CRITICAL,
                         ResponseParser.UrgencyLevel.HIGH
                     ),
                     confidenceLevel = confidence,
-                    analysisTimeMs = inferenceTime,
-                    keyFindings = keyFindings
+                    analysisTimeMs = inferenceTime
                 )
             }
 
             AnalysisTypeOption.STRUCTURAL -> {
                 val safetyStatus = ResponseParser.extractSafetyStatus(resultText)
-                val issues = ResponseParser.extractKeyFindings(resultText)
-                val actions = ResponseParser.extractActionItems(resultText)
 
                 AnalysisResult.Structural(
                     assessment = resultText,
                     safetyStatus = safetyStatus,
-                    identifiedIssues = issues,
-                    immediateActions = actions,
                     confidenceLevel = confidence,
                     analysisTimeMs = inferenceTime,
                     structureType = "Analyzed Structure",
@@ -423,18 +366,13 @@ class ImageTriageViewModel(application: Application) : AndroidViewModel(applicat
             }
 
             AnalysisTypeOption.GENERAL -> {
-                val observations = ResponseParser.extractKeyFindings(resultText)
-                val actions = ResponseParser.extractActionItems(resultText)
                 val riskLevel = ResponseParser.extractRiskLevel(resultText)
 
                 AnalysisResult.General(
                     description = resultText,
-                    keyObservations = observations,
-                    suggestedActions = actions,
                     confidence = confidence,
                     analysisTimeMs = inferenceTime,
-                    riskLevel = riskLevel.name.replace('_', ' '),
-                    safetyRecommendations = actions
+                    riskLevel = riskLevel.name.replace('_', ' ')
                 )
             }
         }

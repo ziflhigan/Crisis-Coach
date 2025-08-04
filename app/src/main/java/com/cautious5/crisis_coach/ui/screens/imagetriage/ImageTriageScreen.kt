@@ -6,7 +6,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -43,23 +42,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Help
-import androidx.compose.material.icons.automirrored.filled.PlaylistAddCheck
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Dangerous
-import androidx.compose.material.icons.filled.Emergency
 import androidx.compose.material.icons.filled.Engineering
-import androidx.compose.material.icons.filled.FindInPage
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocalHospital
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PriorityHigh
 import androidx.compose.material.icons.filled.Psychology
-import androidx.compose.material.icons.filled.Report
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -103,7 +97,6 @@ import com.cautious5.crisis_coach.ui.components.ErrorCard
 import com.cautious5.crisis_coach.ui.components.MarkdownTextWithCodeBlocks
 import com.cautious5.crisis_coach.ui.components.ResultCard
 import com.cautious5.crisis_coach.ui.components.SectionHeader
-import com.cautious5.crisis_coach.ui.dialogs.ImageProcessingDialog
 import com.cautious5.crisis_coach.ui.theme.SemanticColors
 import com.cautious5.crisis_coach.ui.theme.SurfaceTints
 import com.cautious5.crisis_coach.utils.LocalPermissionManager
@@ -251,10 +244,6 @@ private fun ImageTriageContent(
             onDismiss = onDismissImagePicker
         )
     }
-
-    if (uiState.showProcessingDialog) {
-        ImageProcessingDialog()
-    }
 }
 
 @Composable
@@ -372,7 +361,6 @@ private fun AnalysisContentArea(
                     StreamingAnalysisCard(
                         streamingText = uiState.streamingAnalysis,
                         analysisType = uiState.analysisType,
-                        progress = uiState.analysisProgress,
                         onCancel = onCancelAnalysis
                     )
                 }
@@ -406,16 +394,7 @@ private fun DetailedProgressCard(
     progressMessage: String,
     onCancel: () -> Unit
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "progress")
-    val animatedProgress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "progress_animation"
-    )
+    rememberInfiniteTransition(label = "progress")
 
     val isDark = isSystemInDarkTheme()
     val (icon, surfaceTint) = when (analysisType) {
@@ -584,7 +563,6 @@ private fun ProgressStepsIndicator(
 private fun StreamingAnalysisCard(
     streamingText: String,
     analysisType: ImageTriageViewModel.AnalysisTypeOption,
-    progress: ImageTriageViewModel.AnalysisProgress,
     onCancel: () -> Unit
 ) {
     val isDark = isSystemInDarkTheme()
@@ -994,26 +972,6 @@ private fun MedicalResultContent(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Key findings if available
-                if (result.keyFindings.isNotEmpty()) {
-                    ResultList(
-                        title = "Key Findings",
-                        items = result.keyFindings,
-                        icon = Icons.Default.FindInPage,
-                        iconTint = SemanticColors.Info
-                    )
-                }
-
-                // Recommendations
-                if (result.recommendations.isNotEmpty()) {
-                    ResultList(
-                        title = "Recommended Actions",
-                        items = result.recommendations,
-                        icon = Icons.AutoMirrored.Filled.PlaylistAddCheck,
-                        iconTint = SemanticColors.Success
-                    )
-                }
-
                 // Professional care warning
                 if (result.requiresProfessionalCare) {
                     val (careColor, careIcon) = when (result.urgencyLevel) {
@@ -1119,26 +1077,6 @@ private fun StructuralResultContent(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Identified issues
-                if (result.identifiedIssues.isNotEmpty()) {
-                    ResultList(
-                        title = "Identified Issues",
-                        items = result.identifiedIssues,
-                        icon = Icons.Default.Report,
-                        iconTint = SemanticColors.Error
-                    )
-                }
-
-                // Immediate actions
-                if (result.immediateActions.isNotEmpty()) {
-                    ResultList(
-                        title = "Immediate Actions",
-                        items = result.immediateActions,
-                        icon = Icons.Default.Emergency,
-                        iconTint = SemanticColors.Warning
-                    )
-                }
-
                 // Metadata
                 ResultMetadata(
                     confidence = confidence,
@@ -1179,36 +1117,6 @@ private fun GeneralResultContent(
                     markdown = result.description,
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                // Key observations
-                if (result.keyObservations.isNotEmpty()) {
-                    ResultList(
-                        title = "Key Observations",
-                        items = result.keyObservations,
-                        icon = Icons.Default.FindInPage,
-                        iconTint = SemanticColors.Info
-                    )
-                }
-
-                // Suggested actions
-                if (result.suggestedActions.isNotEmpty()) {
-                    ResultList(
-                        title = "Suggested Actions",
-                        items = result.suggestedActions,
-                        icon = Icons.AutoMirrored.Filled.PlaylistAddCheck,
-                        iconTint = SemanticColors.Success
-                    )
-                }
-
-                // Safety recommendations
-                if (result.safetyRecommendations.isNotEmpty()) {
-                    ResultList(
-                        title = "Safety Recommendations",
-                        items = result.safetyRecommendations,
-                        icon = Icons.Default.Security,
-                        iconTint = SemanticColors.Warning
-                    )
-                }
 
                 // Metadata
                 ResultMetadata(
