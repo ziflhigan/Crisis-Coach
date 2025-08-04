@@ -234,14 +234,15 @@ class KnowledgeViewModel(application: Application) : AndroidViewModel(applicatio
 
         viewModelScope.launch {
             try {
-                when (val result = speechService.startRecognition("en-US", "Ask your emergency question")) {
+                speechService.setLanguage("en-US")
+
+                when (val result = speechService.startRecognition("Ask your emergency question")) {
                     is SpeechResult.Success -> {
                         val spokenText = result.results.firstOrNull()?.text
                         if (!spokenText.isNullOrBlank()) {
                             Log.d(TAG, "Voice input received: $spokenText")
                             updateQuery(spokenText)
                             _uiState.value = _uiState.value.copy(showVoiceInput = false)
-                            // Explicitly trigger search after voice input
                             triggerSearch(spokenText)
                         } else {
                             setError("No speech detected. Please try again.")
