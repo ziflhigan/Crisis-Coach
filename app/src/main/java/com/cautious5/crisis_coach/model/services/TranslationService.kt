@@ -90,10 +90,9 @@ class TranslationService(
         _translationState.value = TranslationState.LISTENING
 
         try {
+            speechService.setLanguage(_sourceLanguage.value)
             // Step 1: Capture speech input
-            val speechResult = speechService.startRecognition(_sourceLanguage.value, prompt)
-
-            when (speechResult) {
+            when (val speechResult = speechService.startRecognition(prompt)) {
                 is SpeechResult.Success -> {
                     val spokenText = speechResult.results.firstOrNull()?.text
                     if (spokenText.isNullOrBlank()) {
@@ -170,60 +169,34 @@ class TranslationService(
         _translationState.value = TranslationState.TRANSLATING
 
         try {
-            val prompt = buildTranslationPrompt(text, sourceLanguage, targetLanguage, includePronunciation)
-
+            val prompt = PromptUtils.buildTranslationPrompt(text, sourceLanguage, targetLanguage, includePronunciation)
             var lastError: String? = null
             var successfulResult: TextTranslationResult.Success? = null
 
-            repeat(MAX_TRANSLATION_RETRIES) { attempt ->
-                if (successfulResult != null) return@repeat // Exit early if we got a good result
-
-                Log.d(TAG, "Translation attempt ${attempt + 1}/$MAX_TRANSLATION_RETRIES")
-
-                try {
-                    var accumulatedText: String
-
-                    gemmaModelManager.generateText(prompt).collect { result ->
-                        when (result) {
-                            is GenerationResult.Success -> {
-                                accumulatedText = result.text
-
-                                // Try to parse the current accumulated text
-                                val parsed = ResponseParser.parseTranslationResponse(accumulatedText, includePronunciation)
-
-                                val parsedResult = TextTranslationResult.Success(
-                                    translatedText = parsed.translatedText,
-                                    pronunciationGuide = parsed.pronunciationGuide
-                                )
-
-                                if (parsedResult.translatedText.isNotBlank()) {
-                                    emit(parsedResult.copy(isComplete = false)) // Emit progress
-                                    successfulResult = parsedResult.copy(isComplete = true) // Store final result
-                                }
-                            }
-                            is GenerationResult.Error -> {
-                                lastError = result.message
-                                emit(TextTranslationResult.Error("Translation failed: ${result.message}"))
-                            }
-                        }
+            // Using gemmaModelManager.generateTextWithRealtimeUpdates for a better streaming experience
+            gemmaModelManager.generateTextWithRealtimeUpdates(prompt).collect { result ->
+                when (result) {
+                    is GenerationResult.Success -> {
+                        val parsed = ResponseParser.parseTranslationResponse(result.text, includePronunciation)
+                        val parsedResult = TextTranslationResult.Success(
+                            translatedText = parsed.translatedText,
+                            pronunciationGuide = parsed.pronunciationGuide,
+                            isComplete = false // It's progress
+                        )
+                        emit(parsedResult)
+                        successfulResult = parsedResult.copy(isComplete = true) // Store final version
                     }
-
-                    // If we got a successful result, emit the final version and break
-                    successfulResult?.let {
-                        emit(it)
-                        Log.d(TAG, "Translation completed successfully")
+                    is GenerationResult.Error -> {
+                        lastError = result.message
+                        emit(TextTranslationResult.Error("Translation failed: ${result.message}"))
                     }
-
-                } catch (e: Exception) {
-                    lastError = "Exception during translation: ${e.message}"
-                    Log.w(TAG, "Translation attempt exception: ${e.message}", e)
-                    emit(TextTranslationResult.Error("Translation attempt failed: ${e.message}"))
                 }
             }
 
-            // If no successful result after all retries
-            if (successfulResult == null) {
-                emit(TextTranslationResult.Error("Translation failed after $MAX_TRANSLATION_RETRIES attempts: $lastError"))
+            if (successfulResult != null) {
+                emit(successfulResult!!) // Emit the final, complete result
+            } else {
+                emit(TextTranslationResult.Error("Translation failed: $lastError"))
             }
 
         } catch (e: Exception) {
@@ -238,7 +211,7 @@ class TranslationService(
      * Non-streaming version that returns the final result
      * (for backwards compatibility)
      */
-    suspend fun translateText(
+    private suspend fun translateText(
         text: String,
         sourceLanguage: String,
         targetLanguage: String,
@@ -296,63 +269,39 @@ class TranslationService(
         Log.d(TAG, "Setting languages: $sourceLanguage -> $targetLanguage")
         _sourceLanguage.value = sourceLanguage
         _targetLanguage.value = targetLanguage
+        // Also update the speech service's language setting
+        speechService.setLanguage(sourceLanguage)
     }
 
     /**
      * Gets list of supported languages for translation
      */
     fun getSupportedLanguages(): List<TranslationLanguage> {
+        // This list can be loaded from a config file or be dynamic in the future
         return listOf(
-            TranslationLanguage("en-US", "English (US)",
-                supportsTranslation = true,
-                supportsSpeech = true
-            ),
-            TranslationLanguage("en-GB", "English (UK)",
-                supportsTranslation = true,
-                supportsSpeech = true
-            ),
-            TranslationLanguage("es-ES", "Spanish",
-                supportsTranslation = true,
-                supportsSpeech = true
-            ),
-            TranslationLanguage("fr-FR", "French",
-                supportsTranslation = true,
-                supportsSpeech = true
-            ),
-            TranslationLanguage("de-DE", "German",
-                supportsTranslation = true,
-                supportsSpeech = true
-            ),
-            TranslationLanguage("it-IT", "Italian",
-                supportsTranslation = true,
-                supportsSpeech = true
-            ),
-            TranslationLanguage("pt-BR", "Portuguese (Brazil)",
-                supportsTranslation = true,
-                supportsSpeech = true
-            ),
-            TranslationLanguage("ru-RU", "Russian",
-                supportsTranslation = true,
-                supportsSpeech = false
-            ),
-            TranslationLanguage("ja-JP", "Japanese",
-                supportsTranslation = true,
-                supportsSpeech = false
-            ),
-            TranslationLanguage("ko-KR", "Korean",
-                supportsTranslation = true,
-                supportsSpeech = false
-            ),
-            TranslationLanguage("zh-CN", "Chinese (Simplified)",
-                supportsTranslation = true,
-                supportsSpeech = false
-            ),
+            TranslationLanguage("en-US", "English (US)", supportsTranslation = true, supportsSpeech = true),
+            TranslationLanguage("en-GB", "English (UK)", supportsTranslation = true, supportsSpeech = true),
+            TranslationLanguage("es-ES", "Spanish", supportsTranslation = true, supportsSpeech = true),
+            TranslationLanguage("fr-FR", "French", supportsTranslation = true, supportsSpeech = true),
+            TranslationLanguage("de-DE", "German", supportsTranslation = true, supportsSpeech = true),
+            TranslationLanguage("it-IT", "Italian", supportsTranslation = true, supportsSpeech = true),
+            TranslationLanguage("pt-BR", "Portuguese (Brazil)", supportsTranslation = true, supportsSpeech = true),
+            TranslationLanguage("ru-RU", "Russian", supportsTranslation = true, supportsSpeech = false),
+            TranslationLanguage("ja-JP", "Japanese", supportsTranslation = true, supportsSpeech = false),
+            TranslationLanguage("ko-KR", "Korean", supportsTranslation = true, supportsSpeech = false),
+            TranslationLanguage("zh-CN", "Chinese (Simplified)", supportsTranslation = true, supportsSpeech = false),
             TranslationLanguage("ar", "Arabic", supportsTranslation = true, supportsSpeech = false),
-            TranslationLanguage("hi-IN", "Hindi",
-                supportsTranslation = true,
-                supportsSpeech = false
-            )
+            TranslationLanguage("hi-IN", "Hindi", supportsTranslation = true, supportsSpeech = false)
         )
+    }
+
+    /**
+     * Stops the listening phase of voice recognition gracefully.
+     * This will stop the audio recorder and trigger the transcription process.
+     */
+    fun stopListening() {
+        Log.d(TAG, "Stopping the listening phase to begin transcription.")
+        speechService.stopRecognition()
     }
 
     /**
@@ -363,50 +312,11 @@ class TranslationService(
 
         try {
             speechService.cancelRecognition()
+            gemmaModelManager.cancelGeneration()
             textToSpeechService.stop()
             _translationState.value = TranslationState.IDLE
         } catch (e: Exception) {
             Log.e(TAG, "Error cancelling translation: ${e.message}", e)
-        }
-    }
-
-    // Private helper methods
-
-    /**
-     * Builds the translation prompt for the Gemma model
-     */
-    private fun buildTranslationPrompt(
-        text: String,
-        sourceLanguage: String,
-        targetLanguage: String,
-        includePronunciation: Boolean
-    ): String {
-        return PromptUtils.buildTranslationPrompt(
-            text = text,
-            sourceLanguage = sourceLanguage,
-            targetLanguage = targetLanguage,
-            includePronunciation = includePronunciation
-        )
-    }
-
-    /**
-     * Gets human-readable language name from language code
-     */
-    private fun getLanguageName(languageCode: String): String {
-        return when (languageCode.lowercase()) {
-            "en-us", "en-gb", "en" -> "English"
-            "es-es", "es" -> "Spanish"
-            "fr-fr", "fr" -> "French"
-            "de-de", "de" -> "German"
-            "it-it", "it" -> "Italian"
-            "pt-br", "pt" -> "Portuguese"
-            "ru-ru", "ru" -> "Russian"
-            "ja-jp", "ja" -> "Japanese"
-            "ko-kr", "ko" -> "Korean"
-            "zh-cn", "zh" -> "Chinese"
-            "ar" -> "Arabic"
-            "hi-in", "hi" -> "Hindi"
-            else -> languageCode.uppercase()
         }
     }
 }
@@ -447,7 +357,7 @@ sealed class TextTranslationResult {
     data class Success(
         val translatedText: String,
         val pronunciationGuide: String?,
-        val isComplete: Boolean = true // New parameter for streaming support
+        val isComplete: Boolean = true
     ) : TextTranslationResult()
 
     data class Error(val message: String, val cause: Throwable? = null) : TextTranslationResult()

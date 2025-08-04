@@ -14,6 +14,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flowOn
 
 /**
  * Service for analyzing images using Gemma's multimodal capabilities.
@@ -43,12 +46,19 @@ class ImageAnalysisService(
         image: Bitmap,
         specificQuestion: String? = null,
         patientContext: String? = null
-    ): Flow<GenerationResult> {
+    ): Flow<GenerationResult> = flow {
         Log.d(TAG, "Starting streaming medical image analysis")
         val prompt = PromptUtils.buildMedicalAnalysisPrompt(specificQuestion, patientContext)
-        val processedImage = ImageUtils.preprocessBitmap(image)
-        return gemmaModelManager.generateFromImageWithRealtimeUpdates(processedImage, prompt)
-    }
+
+        val processedImage = withContext(Dispatchers.Default) {
+            ImageUtils.preprocessBitmap(image)
+        }
+
+        // Emit all results from the model's flow
+        emitAll(
+            gemmaModelManager.generateFromImageWithRealtimeUpdates(processedImage, prompt)
+        )
+    }.flowOn(Dispatchers.Default)
 
     /**
      * Analyzes a structural image and streams the response.
@@ -58,12 +68,18 @@ class ImageAnalysisService(
         image: Bitmap,
         structureType: StructureType = StructureType.UNKNOWN,
         specificConcerns: String? = null
-    ): Flow<GenerationResult> {
+    ): Flow<GenerationResult> = flow {
         Log.d(TAG, "Starting streaming structural image analysis for: $structureType")
         val prompt = PromptUtils.buildStructuralAnalysisPrompt(structureType.displayName, specificConcerns)
-        val processedImage = ImageUtils.preprocessBitmap(image)
-        return gemmaModelManager.generateFromImageWithRealtimeUpdates(processedImage, prompt)
-    }
+
+        val processedImage = withContext(Dispatchers.Default) {
+            ImageUtils.preprocessBitmap(image)
+        }
+
+        emitAll(
+            gemmaModelManager.generateFromImageWithRealtimeUpdates(processedImage, prompt)
+        )
+    }.flowOn(Dispatchers.Default)
 
     /**
      * Analyzes a general image and streams the response.
@@ -72,12 +88,18 @@ class ImageAnalysisService(
     fun analyzeGeneralImageStreaming(
         image: Bitmap,
         question: String
-    ): Flow<GenerationResult> {
+    ): Flow<GenerationResult> = flow {
         Log.d(TAG, "Starting streaming general image analysis")
         val prompt = PromptUtils.buildGeneralImageAnalysisPrompt(question)
-        val processedImage = ImageUtils.preprocessBitmap(image)
-        return gemmaModelManager.generateFromImageWithRealtimeUpdates(processedImage, prompt)
-    }
+
+        val processedImage = withContext(Dispatchers.Default) {
+            ImageUtils.preprocessBitmap(image)
+        }
+
+        emitAll(
+            gemmaModelManager.generateFromImageWithRealtimeUpdates(processedImage, prompt)
+        )
+    }.flowOn(Dispatchers.Default)
 
     private suspend fun performImageAnalysis(
         image: Bitmap,
