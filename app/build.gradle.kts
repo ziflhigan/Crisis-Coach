@@ -16,6 +16,7 @@ android {
 
     androidResources {
         noCompress.add("tflite")
+        noCompress.add("bin")
     }
 
     packaging {
