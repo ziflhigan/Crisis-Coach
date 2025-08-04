@@ -232,10 +232,12 @@ class TranslateViewModel(application: Application) : AndroidViewModel(applicatio
     /**
      * Stop voice translation
      */
+    /**
+     * Stop voice translation
+     */
     fun stopVoiceTranslation() {
-        Log.d(TAG, "Stopping voice translation")
-        translationService.cancelTranslation()
-        clearTranslation()
+        Log.d(TAG, "Stopping voice recording to begin translation")
+        translationService.stopListening()
     }
 
     /**
