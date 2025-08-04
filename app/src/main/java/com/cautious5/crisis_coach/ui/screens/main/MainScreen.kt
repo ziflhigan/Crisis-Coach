@@ -11,6 +11,7 @@ import com.cautious5.crisis_coach.MainViewModel
 import com.cautious5.crisis_coach.model.ai.HardwarePreference
 import com.cautious5.crisis_coach.model.ai.ModelConfig
 import com.cautious5.crisis_coach.model.ai.ModelVariant
+import com.cautious5.crisis_coach.ui.dialogs.InitializationProgressDialog
 import com.cautious5.crisis_coach.ui.dialogs.ModelReloadingDialog
 import com.cautious5.crisis_coach.ui.dialogs.SettingsDialog
 import com.cautious5.crisis_coach.ui.navigation.AppNavigation
@@ -30,6 +31,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     title = uiState.errorTitle ?: "Initialization Error",
                     message = uiState.errorMessage ?: Constants.ErrorMessages.UNKNOWN_ERROR,
                     downloadState = uiState.downloadState,
+                    deviceCapability = uiState.deviceCapability,
                     onRetry = viewModel::initializeApp,
                     onDownload = if (uiState.needsModelDownload) viewModel::startModelDownload else null,
                     onCancelDownload = viewModel::cancelDownload
@@ -42,7 +44,16 @@ fun MainScreen(viewModel: MainViewModel) {
             }
         }
 
+        // Show initialization progress dialog while app is loading in background
+        if (uiState.showInitializationProgress) {
+            InitializationProgressDialog(
+                phase = uiState.initPhase,
+                progress = uiState.initProgress,
+                statusText = uiState.initStatusText
+            )
+        }
 
+        // Settings dialog
         if (uiState.showSettingsDialog) {
             val defaultConfig = uiState.currentModelConfig ?: ModelConfig(
                 variant = ModelVariant.GEMMA_3N_E2B,
@@ -67,6 +78,7 @@ fun MainScreen(viewModel: MainViewModel) {
             )
         }
 
+        // Model reloading dialog (for settings changes)
         if (uiState.isModelReloading) {
             ModelReloadingDialog(
                 isApplyingParams = uiState.isApplyingParams
