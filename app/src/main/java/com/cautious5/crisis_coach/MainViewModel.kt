@@ -44,8 +44,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     enum class InitializationState { LOADING, SUCCESS, ERROR }
 
+    enum class InitializationPhase {
+        CHECKING_DEVICE,
+        INITIALIZING_EMBEDDER,
+        INITIALIZING_DATABASE,
+        CHECKING_MODEL,
+        LOADING_MODEL,
+        INITIALIZING_SERVICES,
+        COMPLETED
+    }
+
     data class MainUiState(
         val initState: InitializationState = InitializationState.LOADING,
+        val initPhase: InitializationPhase = InitializationPhase.CHECKING_DEVICE,
+        val initProgress: Float = 0f,
+        val initStatusText: String = "Starting initialization...",
         val errorTitle: String? = null,
         val errorMessage: String? = null,
         val deviceCapability: DeviceCapabilityChecker.DeviceCapability? = null,
@@ -59,12 +72,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val reloadProgress: Float = 0f,
         val modelDownloadStatus: Map<ModelVariant, Boolean> = emptyMap(),
         val isApplyingParams: Boolean = false,
-        val pendingGenerationParams: GenerationParams? = null
+        val pendingGenerationParams: GenerationParams? = null,
+        val showInitializationProgress: Boolean = false // New flag for showing initialization progress
     )
 
     private val hfAuthManager by lazy { HuggingFaceAuthManager(getApplication()) }
     private val modelDownloader by lazy { ModelDownloader(getApplication(), hfAuthManager) }
-
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -103,9 +116,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update {
                 it.copy(
                     initState = InitializationState.LOADING,
+                    initPhase = InitializationPhase.CHECKING_DEVICE,
+                    initProgress = 0f,
+                    initStatusText = "Checking device capabilities...",
                     errorTitle = null,
                     errorMessage = null,
-                    needsModelDownload = false
+                    needsModelDownload = false,
+                    showInitializationProgress = true
                 )
             }
 
@@ -114,8 +131,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val app = getApplication<CrisisCoachApplication>()
 
-                // Step 1: Assess Device Capability
+                // Step 1: Assess Device Capability (0-10%)
                 Log.d(TAG, "Step 1: Assessing device capabilities...")
+                updateInitProgress(InitializationPhase.CHECKING_DEVICE, 0.05f, "Assessing device capabilities...")
+
                 val deviceCapability = DeviceCapabilityChecker.assessDeviceCapability(getApplication())
                 _uiState.update { it.copy(deviceCapability = deviceCapability) }
 
@@ -124,25 +143,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                // Step 2: Initialize Text Embedder (critical dependency for the database)
+                updateInitProgress(InitializationPhase.CHECKING_DEVICE, 0.1f, "Device capability assessment complete")
+
+                // Step 2: Initialize Text Embedder (10-20%)
                 Log.d(TAG, "Step 2: Initializing Text Embedder...")
+                updateInitProgress(InitializationPhase.INITIALIZING_EMBEDDER, 0.1f, "Initializing AI text embedder...")
+
                 when (val embedderResult = app.textEmbedder.initialize()) {
                     is EmbedderResult.Error -> {
                         setInitializationError("AI Component Failed", embedderResult.message)
                         return@launch
                     }
-                    is EmbedderResult.Success -> Log.i(TAG, "TextEmbedder initialized successfully.")
+                    is EmbedderResult.Success -> {
+                        Log.i(TAG, "TextEmbedder initialized successfully.")
+                        updateInitProgress(InitializationPhase.INITIALIZING_EMBEDDER, 0.2f, "Text embedder ready")
+                    }
                 }
 
-                // Step 3: Initialize Knowledge Base Database
+                // Step 3: Initialize Knowledge Base Database (20-60%)
                 Log.d(TAG, "Step 3: Initializing knowledge base...")
+                updateInitProgress(InitializationPhase.INITIALIZING_DATABASE, 0.2f, "Setting up knowledge base...")
+
                 val dbInitializer = DatabaseInitializer(getApplication(), app.knowledgeBase, app.textEmbedder)
                 when (val dbResult = dbInitializer.initializeIfNeeded()) {
                     is DbInitResult.Success -> {
                         Log.i(TAG, "Database initialized with ${dbResult.entriesAdded} entries from ${dbResult.sourcesProcessed} sources in ${dbResult.initializationTimeMs}ms")
+                        updateInitProgress(InitializationPhase.INITIALIZING_DATABASE, 0.6f, "Knowledge base ready (${dbResult.entriesAdded} entries loaded)")
                     }
                     is DbInitResult.AlreadyInitialized -> {
                         Log.i(TAG, "Database was already initialized")
+                        updateInitProgress(InitializationPhase.INITIALIZING_DATABASE, 0.6f, "Knowledge base already initialized")
                     }
                     is DbInitResult.Error -> {
                         Log.e(TAG, "Database initialization failed: ${dbResult.message}")
@@ -156,16 +186,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     app.knowledgeBase.debugDatabaseContent()
                 }
 
-                // Step 4: Check if model exists BEFORE trying to initialize it
+                // Step 4: Check if model exists BEFORE trying to initialize it (60-70%)
                 Log.d(TAG, "Step 4: Checking for AI model...")
+                updateInitProgress(InitializationPhase.CHECKING_MODEL, 0.6f, "Checking AI model availability...")
+
                 when (val loadResult = app.gemmaModelManager.modelLoader.loadModel(deviceCapability.recommendedModelVariant)) {
                     is ModelLoader.LoadResult.Missing -> {
                         Log.d(TAG, "Model missing, showing download option")
                         _uiState.update {
                             it.copy(
                                 initState = InitializationState.ERROR,
+                                showInitializationProgress = false,
                                 errorTitle = "AI Model Required",
-                                errorMessage = "Crisis Coach needs to download the AI model (${deviceCapability.recommendedModelVariant.displayName}) to function. This is a one-time download of approximately ${deviceCapability.recommendedModelVariant.approximateRamUsageMB / 1024}GB.",
+                                errorMessage = "Crisis Coach needs to download the AI model to function. This is a one-time download.",
                                 needsModelDownload = true
                             )
                         }
@@ -177,15 +210,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     is ModelLoader.LoadResult.Success -> {
                         Log.i(TAG, "Model file found, proceeding with initialization...")
+                        updateInitProgress(InitializationPhase.CHECKING_MODEL, 0.7f, "AI model found")
                     }
                 }
 
-                // Step 5: Initialize the main Gemma AI Model (now we know the file exists)
+                // Step 5: Initialize the main Gemma AI Model (70-90%)
                 Log.d(TAG, "Step 5: Initializing main Gemma AI model...")
+                updateInitProgress(InitializationPhase.LOADING_MODEL, 0.7f, "Loading AI model...")
 
+                // Transition to showing the main navigation with model loading dialog
                 _uiState.update { it.copy(
-                    initState = InitializationState.SUCCESS, // Set to SUCCESS early
-                    isModelReloading = true, // Reuse this flag for initial load
+                    initState = InitializationState.SUCCESS, // Set to SUCCESS early like original
+                    showInitializationProgress = false, // Hide initialization progress
+                    isModelReloading = true, // Show model loading dialog
                     reloadProgress = 0f
                 )}
 
@@ -226,20 +263,55 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // Step 6: Initialize all application services
+                // Step 6: Initialize all application services (90-100%)
                 Log.d(TAG, "Step 6: Eagerly initializing core services...")
+
                 app.translationService
                 app.imageAnalysisService
                 Log.i(TAG, "All services are ready.")
 
-                // If all steps complete, set state to SUCCESS
+                // Step 7: Finalize initialization (100%)
                 Log.i(TAG, "App initialization completed successfully.")
-                _uiState.update { it.copy(initState = InitializationState.SUCCESS) }
+
+                _uiState.update {
+                    it.copy(
+                        initState = InitializationState.SUCCESS,
+                        isModelReloading = false // Hide model loading dialog
+                    )
+                }
 
             } catch (e: Exception) {
                 Log.e(TAG, "A critical error occurred during app initialization", e)
                 setInitializationError("Critical Error", e.message ?: "An unknown error occurred during setup.")
             }
+        }
+    }
+
+    /**
+     * Updates initialization progress with phase, progress percentage, and status text
+     */
+    private fun updateInitProgress(phase: InitializationPhase, progress: Float, statusText: String) {
+        _uiState.update {
+            it.copy(
+                initPhase = phase,
+                initProgress = progress,
+                initStatusText = statusText
+            )
+        }
+    }
+
+    /**
+     * Updates the UI state to show an error and hide progress dialog.
+     */
+    private fun setInitializationError(title: String, message: String) {
+        Log.e(TAG, "Initialization error set: $title - $message")
+        _uiState.update {
+            it.copy(
+                initState = InitializationState.ERROR,
+                showInitializationProgress = false,
+                errorTitle = title,
+                errorMessage = message
+            )
         }
     }
 
@@ -408,20 +480,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
             }
-        }
-    }
-
-    /**
-     * Updates the UI state to show an error.
-     */
-    private fun setInitializationError(title: String, message: String) {
-        Log.e(TAG, "Initialization error set: $title - $message")
-        _uiState.update {
-            it.copy(
-                initState = InitializationState.ERROR,
-                errorTitle = title,
-                errorMessage = message
-            )
         }
     }
 
