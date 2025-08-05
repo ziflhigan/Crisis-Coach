@@ -33,7 +33,7 @@ The application is currently available for Android, with an iOS version planned 
 * **Real-time Multimodal Translation:** Break down communication barriers with instant, on-the-fly translation between languages. Features speech-to-text, text-to-speech, and phonetic guidance to ensure clear pronunciation.
 * **AI-Powered Image Analysis:** Leverage the vision capabilities of Gemma 3n for rapid field assessments. Analyze images to identify the severity of structural damage or perform initial medical triage on injuries.
 * **On-Device RAG Knowledge Base:** Access a comprehensive, pre-loaded emergency medical database using natural language queries. The Retrieval-Augmented Generation (RAG) system provides immediate, contextually relevant information from trusted protocols.
-* **Adaptive Performance:** Automatically detects device capabilities to deploy the optimal model—the efficient Gemma-3n-E2B (\~5B parameters) for mid-range devices or the high-accuracy Gemma-3n-E4B (\~8B parameters) for high-end hardware, with GPU/NPU acceleration via LiteRT.
+* **Adaptive Performance:** Automatically detects device capabilities to deploy the optimal model—the efficient Gemma-3n-E2B (\~2B parameters) for mid-range devices or the high-accuracy Gemma-3n-E4B (\~4B parameters) for high-end hardware, with GPU/NPU acceleration via LiteRT.
 
 ## Get Started in Minutes
 
