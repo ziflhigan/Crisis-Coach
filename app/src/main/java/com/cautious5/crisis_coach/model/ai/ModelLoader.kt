@@ -155,32 +155,32 @@ class ModelLoader(private val context: Context) {
     /**
      * Validates if a model file exists and has correct size
      */
-    fun isValidModelFile(filePath: String): Boolean {
+    suspend fun isValidModelFile(filePath: String): Boolean = withContext(Dispatchers.IO) {
         val file = File(filePath)
 
         if (!file.exists()) {
             Log.d(TAG, "Model file does not exist: $filePath")
-            return false
+            return@withContext false
         }
 
         val fileSize = file.length()
         if (fileSize < MIN_MODEL_SIZE_BYTES) {
             Log.w(TAG, "Model file too small: $fileSize bytes (minimum: $MIN_MODEL_SIZE_BYTES)")
-            return false
+            return@withContext false
         }
 
         if (fileSize > MAX_MODEL_SIZE_BYTES) {
             Log.w(TAG, "Model file too large: $fileSize bytes (maximum: $MAX_MODEL_SIZE_BYTES)")
-            return false
+            return@withContext false
         }
 
         if (!file.canRead()) {
             Log.w(TAG, "Cannot read model file: $filePath")
-            return false
+            return@withContext false
         }
 
         Log.d(TAG, "Valid model file found: $filePath (${fileSize / (1024 * 1024)} MB)")
-        return true
+        return@withContext true
     }
 
     /**
@@ -290,9 +290,10 @@ class ModelLoader(private val context: Context) {
 
     /**
      * Checks available storage space for model operations
+     * Properly handles I/O on IO thread
      */
-    fun getAvailableStorageSpace(): Long {
-        return try {
+    suspend fun getAvailableStorageSpace(): Long = withContext(Dispatchers.IO) {
+        return@withContext try {
             val internalDir = context.filesDir
             val freeSpace = internalDir.freeSpace
             Log.d(TAG, "Available internal storage: ${freeSpace / (1024 * 1024)} MB")
@@ -326,8 +327,9 @@ class ModelLoader(private val context: Context) {
 
     /**
      * Gets information about all available models
+     * Handles I/O operations on IO thread
      */
-    fun getAvailableModels(): List<ModelInfo> {
+    suspend fun getAvailableModels(): List<ModelInfo> = withContext(Dispatchers.IO) {
         val models = mutableListOf<ModelInfo>()
 
         ModelVariant.entries.forEach { variant ->
@@ -359,7 +361,7 @@ class ModelLoader(private val context: Context) {
             )
         }
 
-        return models
+        return@withContext models
     }
 }
 

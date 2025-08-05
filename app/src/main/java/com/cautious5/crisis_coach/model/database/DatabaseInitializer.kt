@@ -80,7 +80,7 @@ class DatabaseInitializer(
             when (val loadResult = loadAllDocuments()) {
                 is LoadResult.Success -> {
                     val elapsedTime = System.currentTimeMillis() - startTime
-                    Log.i(TAG, "✓ Successfully loaded ${loadResult.totalEntries} entries from ${loadResult.sourceCount} sources in ${elapsedTime}ms")
+                    Log.i(TAG, "Successfully loaded ${loadResult.totalEntries} entries from ${loadResult.sourceCount} sources in ${elapsedTime}ms")
 
                     if (loadResult.errors.isNotEmpty()) {
                         Log.w(TAG, "Encountered ${loadResult.errors.size} errors during loading:")
@@ -103,13 +103,13 @@ class DatabaseInitializer(
                     )
                 }
                 is LoadResult.Error -> {
-                    Log.e(TAG, "✗ Failed to load initial data: ${loadResult.message}")
+                    Log.e(TAG, "Failed to load initial data: ${loadResult.message}")
                     InitializationResult.Error(loadResult.message, loadResult.cause)
                 }
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "✗ Database initialization failed with exception", e)
+            Log.e(TAG, "Database initialization failed with exception", e)
             InitializationResult.Error("Initialization failed: ${e.message}", e)
         }
     }
