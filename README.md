@@ -87,6 +87,9 @@ This project would not be possible without the incredible open-source tools and 
 ### Overview Sequence Diagram
 <img width="3840" height="3681" alt="cc-overview-sequence" src="https://github.com/user-attachments/assets/8fd275a3-e2f8-4b72-b2fc-ac92f1da0cd3" />
 
+### RAG Architecture Diagram
+<img width="876" height="498" alt="RAG-Crisis_Coach" src="https://github.com/user-attachments/assets/ecf4d7d6-c8a5-4a10-8939-21e531fcc87c" />
+
 -----
 
 *This project was developed by **the cautious 5**.*
