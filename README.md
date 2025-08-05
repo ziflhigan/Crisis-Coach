@@ -55,7 +55,7 @@ Crisis Coach stands at the bleeding edge of on-device AI, integrating a suite of
 * **MediaPipe LLM Inference API:** A streamlined, powerful API used to manage and interact with the Gemma model on Android for both text and vision-language tasks.
 * **Hugging Face Integration:** The application seamlessly authenticates with and downloads the required Gemma model variants directly from Hugging Face repositories upon initial setup.
 * **On-Device RAG with ObjectBox:** Implements a sophisticated Retrieval-Augmented Generation pipeline using the ObjectBox mobile vector database to search and retrieve information from a local knowledge base.
-* 
+* **Native Text-to-Speech (TTS) Engine:** Utilizes Android's built-in TTS API to provide clear, audible voice output for translations, ensuring accessibility and ease of use in noisy environments. This feature is a core part of our current translation system and will be enhanced in a future release with our integrated Whisper model to handle the speech recognition component, creating a fully self-contained, offline voice-to-voice translation loop.
 
 ## Future Improvements
 
