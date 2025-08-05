@@ -124,11 +124,12 @@ fun InitializationProgressDialog(
 
 @Composable
 private fun PhaseIndicators(currentPhase: MainViewModel.InitializationPhase) {
+    // Updated order: Model check comes before database initialization
     val phases = listOf(
         MainViewModel.InitializationPhase.CHECKING_DEVICE to "Device",
+        MainViewModel.InitializationPhase.CHECKING_MODEL to "Model Check",
         MainViewModel.InitializationPhase.INITIALIZING_EMBEDDER to "Embedder",
         MainViewModel.InitializationPhase.INITIALIZING_DATABASE to "Database",
-        MainViewModel.InitializationPhase.CHECKING_MODEL to "Model Check",
         MainViewModel.InitializationPhase.LOADING_MODEL to "AI Model",
         MainViewModel.InitializationPhase.INITIALIZING_SERVICES to "Services",
         MainViewModel.InitializationPhase.COMPLETED to "Complete"
@@ -176,9 +177,9 @@ private fun PhaseIndicators(currentPhase: MainViewModel.InitializationPhase) {
 private fun getPhaseIcon(phase: MainViewModel.InitializationPhase): ImageVector {
     return when (phase) {
         MainViewModel.InitializationPhase.CHECKING_DEVICE -> Icons.Default.Dashboard
+        MainViewModel.InitializationPhase.CHECKING_MODEL -> Icons.Default.CloudDownload
         MainViewModel.InitializationPhase.INITIALIZING_EMBEDDER -> Icons.Default.Psychology
         MainViewModel.InitializationPhase.INITIALIZING_DATABASE -> Icons.Default.Storage
-        MainViewModel.InitializationPhase.CHECKING_MODEL -> Icons.Default.CloudDownload
         MainViewModel.InitializationPhase.LOADING_MODEL -> Icons.Default.Architecture
         MainViewModel.InitializationPhase.INITIALIZING_SERVICES -> Icons.Default.AccountTree
         MainViewModel.InitializationPhase.COMPLETED -> Icons.Default.CheckCircle
@@ -188,9 +189,9 @@ private fun getPhaseIcon(phase: MainViewModel.InitializationPhase): ImageVector 
 private fun getPhaseTitle(phase: MainViewModel.InitializationPhase): String {
     return when (phase) {
         MainViewModel.InitializationPhase.CHECKING_DEVICE -> "Checking Device"
+        MainViewModel.InitializationPhase.CHECKING_MODEL -> "Checking AI Model"
         MainViewModel.InitializationPhase.INITIALIZING_EMBEDDER -> "Setting Up AI Embedder"
         MainViewModel.InitializationPhase.INITIALIZING_DATABASE -> "Building Knowledge Base"
-        MainViewModel.InitializationPhase.CHECKING_MODEL -> "Checking AI Model"
         MainViewModel.InitializationPhase.LOADING_MODEL -> "Loading AI Model"
         MainViewModel.InitializationPhase.INITIALIZING_SERVICES -> "Starting Services"
         MainViewModel.InitializationPhase.COMPLETED -> "Setup Complete"

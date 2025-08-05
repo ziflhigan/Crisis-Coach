@@ -26,6 +26,13 @@ fun MainScreen(viewModel: MainViewModel) {
         color = MaterialTheme.colorScheme.background
     ) {
         when (uiState.initState) {
+            MainViewModel.InitializationState.LOADING -> {
+                InitializationProgressDialog(
+                    phase = uiState.initPhase,
+                    progress = uiState.initProgress,
+                    statusText = uiState.initStatusText
+                )
+            }
             MainViewModel.InitializationState.ERROR -> {
                 ErrorScreen(
                     title = uiState.errorTitle ?: "Initialization Error",
@@ -37,52 +44,44 @@ fun MainScreen(viewModel: MainViewModel) {
                     onCancelDownload = viewModel::cancelDownload
                 )
             }
-            else -> {
+            MainViewModel.InitializationState.SUCCESS -> {
+                // Show the main navigation - app is ready!
                 AppNavigation(
                     onSettingsClick = viewModel::showSettings
                 )
+
+                // Model reloading dialog (for settings changes) - overlaid on main navigation
+                if (uiState.isModelReloading) {
+                    ModelReloadingDialog(
+                        isApplyingParams = uiState.isApplyingParams
+                    )
+                }
+
+                // Settings dialog - overlaid on main navigation
+                if (uiState.showSettingsDialog) {
+                    val defaultConfig = uiState.currentModelConfig ?: ModelConfig(
+                        variant = ModelVariant.GEMMA_3N_E2B,
+                        hardwarePreference = HardwarePreference.AUTO,
+                        modelPath = ""
+                    )
+
+                    SettingsDialog(
+                        currentConfig = defaultConfig,
+                        availableVariants = ModelVariant.entries,
+                        downloadState = uiState.downloadState,
+                        modelDownloadStatus = uiState.modelDownloadStatus,
+                        modelVariantForDownload = uiState.modelVariantForDownload,
+                        pendingGenerationParams = uiState.pendingGenerationParams,
+                        isApplyingParams = uiState.isApplyingParams,
+                        onDismiss = viewModel::hideSettings,
+                        onModelVariantSelected = viewModel::selectModelVariant,
+                        onHardwarePreferenceChanged = viewModel::updateHardwarePreference,
+                        onGenerationParamsChanged = viewModel::updateGenerationParams,
+                        onApplyGenerationParams = viewModel::applyGenerationParams,
+                        onDownloadModel = viewModel::startModelDownload
+                    )
+                }
             }
-        }
-
-        // Show initialization progress dialog while app is loading in background
-        if (uiState.showInitializationProgress) {
-            InitializationProgressDialog(
-                phase = uiState.initPhase,
-                progress = uiState.initProgress,
-                statusText = uiState.initStatusText
-            )
-        }
-
-        // Settings dialog
-        if (uiState.showSettingsDialog) {
-            val defaultConfig = uiState.currentModelConfig ?: ModelConfig(
-                variant = ModelVariant.GEMMA_3N_E2B,
-                hardwarePreference = HardwarePreference.AUTO,
-                modelPath = ""
-            )
-
-            SettingsDialog(
-                currentConfig = defaultConfig,
-                availableVariants = ModelVariant.entries,
-                downloadState = uiState.downloadState,
-                modelDownloadStatus = uiState.modelDownloadStatus,
-                modelVariantForDownload = uiState.modelVariantForDownload,
-                pendingGenerationParams = uiState.pendingGenerationParams,
-                isApplyingParams = uiState.isApplyingParams,
-                onDismiss = viewModel::hideSettings,
-                onModelVariantSelected = viewModel::selectModelVariant,
-                onHardwarePreferenceChanged = viewModel::updateHardwarePreference,
-                onGenerationParamsChanged = viewModel::updateGenerationParams,
-                onApplyGenerationParams = viewModel::applyGenerationParams,
-                onDownloadModel = viewModel::startModelDownload
-            )
-        }
-
-        // Model reloading dialog (for settings changes)
-        if (uiState.isModelReloading) {
-            ModelReloadingDialog(
-                isApplyingParams = uiState.isApplyingParams
-            )
         }
     }
 }

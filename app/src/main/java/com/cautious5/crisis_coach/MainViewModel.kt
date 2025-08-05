@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Main ViewModel for MainActivity
@@ -46,9 +47,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     enum class InitializationPhase {
         CHECKING_DEVICE,
+        CHECKING_MODEL,  // Moved before database initialization
         INITIALIZING_EMBEDDER,
         INITIALIZING_DATABASE,
-        CHECKING_MODEL,
         LOADING_MODEL,
         INITIALIZING_SERVICES,
         COMPLETED
@@ -73,7 +74,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val modelDownloadStatus: Map<ModelVariant, Boolean> = emptyMap(),
         val isApplyingParams: Boolean = false,
         val pendingGenerationParams: GenerationParams? = null,
-        val showInitializationProgress: Boolean = false // New flag for showing initialization progress
+        val showInitializationProgress: Boolean = true
     )
 
     private val hfAuthManager by lazy { HuggingFaceAuthManager(getApplication()) }
@@ -112,7 +113,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * This function is safe to be called again for a retry.
      */
     fun initializeApp() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Main) {
             _uiState.update {
                 it.copy(
                     initState = InitializationState.LOADING,
@@ -126,16 +127,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
 
-            checkAllModelStatuses()
+            // Check model statuses on IO thread
+            withContext(Dispatchers.IO) {
+                checkAllModelStatuses()
+            }
 
             try {
                 val app = getApplication<CrisisCoachApplication>()
 
-                // Step 1: Assess Device Capability (0-10%)
+                // Step 1: Assess Device Capability (0-10%) - FAST WORK ON MAIN
                 Log.d(TAG, "Step 1: Assessing device capabilities...")
                 updateInitProgress(InitializationPhase.CHECKING_DEVICE, 0.05f, "Assessing device capabilities...")
 
-                val deviceCapability = DeviceCapabilityChecker.assessDeviceCapability(getApplication())
+                // Move heavy device capability check to IO thread
+                val deviceCapability = withContext(Dispatchers.IO) {
+                    DeviceCapabilityChecker.assessDeviceCapability(getApplication())
+                }
                 _uiState.update { it.copy(deviceCapability = deviceCapability) }
 
                 if (!deviceCapability.canRunApp) {
@@ -145,52 +152,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 updateInitProgress(InitializationPhase.CHECKING_DEVICE, 0.1f, "Device capability assessment complete")
 
-                // Step 2: Initialize Text Embedder (10-20%)
-                Log.d(TAG, "Step 2: Initializing Text Embedder...")
-                updateInitProgress(InitializationPhase.INITIALIZING_EMBEDDER, 0.1f, "Initializing AI text embedder...")
+                // Step 2: Check if model exists BEFORE other heavy initialization (10-20%)
+                Log.d(TAG, "Step 2: Checking for AI model...")
+                updateInitProgress(InitializationPhase.CHECKING_MODEL, 0.1f, "Checking AI model availability...")
 
-                when (val embedderResult = app.textEmbedder.initialize()) {
-                    is EmbedderResult.Error -> {
-                        setInitializationError("AI Component Failed", embedderResult.message)
-                        return@launch
-                    }
-                    is EmbedderResult.Success -> {
-                        Log.i(TAG, "TextEmbedder initialized successfully.")
-                        updateInitProgress(InitializationPhase.INITIALIZING_EMBEDDER, 0.2f, "Text embedder ready")
-                    }
+                val loadResult = withContext(Dispatchers.IO) {
+                    app.gemmaModelManager.modelLoader.loadModel(deviceCapability.recommendedModelVariant)
                 }
 
-                // Step 3: Initialize Knowledge Base Database (20-60%)
-                Log.d(TAG, "Step 3: Initializing knowledge base...")
-                updateInitProgress(InitializationPhase.INITIALIZING_DATABASE, 0.2f, "Setting up knowledge base...")
-
-                val dbInitializer = DatabaseInitializer(getApplication(), app.knowledgeBase, app.textEmbedder)
-                when (val dbResult = dbInitializer.initializeIfNeeded()) {
-                    is DbInitResult.Success -> {
-                        Log.i(TAG, "Database initialized with ${dbResult.entriesAdded} entries from ${dbResult.sourcesProcessed} sources in ${dbResult.initializationTimeMs}ms")
-                        updateInitProgress(InitializationPhase.INITIALIZING_DATABASE, 0.6f, "Knowledge base ready (${dbResult.entriesAdded} entries loaded)")
-                    }
-                    is DbInitResult.AlreadyInitialized -> {
-                        Log.i(TAG, "Database was already initialized")
-                        updateInitProgress(InitializationPhase.INITIALIZING_DATABASE, 0.6f, "Knowledge base already initialized")
-                    }
-                    is DbInitResult.Error -> {
-                        Log.e(TAG, "Database initialization failed: ${dbResult.message}")
-                        setInitializationError("Database Failed", dbResult.message)
-                        return@launch
-                    }
-                }
-
-                // Debug: Check what's actually in the database
-                viewModelScope.launch(Dispatchers.IO) {
-                    app.knowledgeBase.debugDatabaseContent()
-                }
-
-                // Step 4: Check if model exists BEFORE trying to initialize it (60-70%)
-                Log.d(TAG, "Step 4: Checking for AI model...")
-                updateInitProgress(InitializationPhase.CHECKING_MODEL, 0.6f, "Checking AI model availability...")
-
-                when (val loadResult = app.gemmaModelManager.modelLoader.loadModel(deviceCapability.recommendedModelVariant)) {
+                when (loadResult) {
                     is ModelLoader.LoadResult.Missing -> {
                         Log.d(TAG, "Model missing, showing download option")
                         _uiState.update {
@@ -210,8 +180,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     is ModelLoader.LoadResult.Success -> {
                         Log.i(TAG, "Model file found, proceeding with initialization...")
-                        updateInitProgress(InitializationPhase.CHECKING_MODEL, 0.7f, "AI model found")
+                        updateInitProgress(InitializationPhase.CHECKING_MODEL, 0.2f, "AI model found")
                     }
+                }
+
+                // Step 3: Initialize Text Embedder (20-30%)
+                Log.d(TAG, "Step 3: Initializing Text Embedder...")
+                updateInitProgress(InitializationPhase.INITIALIZING_EMBEDDER, 0.2f, "Initializing AI text embedder...")
+
+                // Ensure embedder initialization happens on worker thread
+                val embedderResult = withContext(Dispatchers.IO) {
+                    app.textEmbedder.initialize()
+                }
+
+                when (embedderResult) {
+                    is EmbedderResult.Error -> {
+                        setInitializationError("AI Component Failed", embedderResult.message)
+                        return@launch
+                    }
+                    is EmbedderResult.Success -> {
+                        Log.i(TAG, "TextEmbedder initialized successfully.")
+                        updateInitProgress(InitializationPhase.INITIALIZING_EMBEDDER, 0.3f, "Text embedder ready")
+                    }
+                }
+
+                // Step 4: Initialize Knowledge Base Database (30-70%)
+                Log.d(TAG, "Step 4: Initializing knowledge base...")
+                updateInitProgress(InitializationPhase.INITIALIZING_DATABASE, 0.3f, "Setting up knowledge base...")
+
+                val dbInitializer = DatabaseInitializer(getApplication(), app.knowledgeBase, app.textEmbedder)
+
+                // Move heavy database initialization to IO thread
+                val dbResult = withContext(Dispatchers.IO) {
+                    dbInitializer.initializeIfNeeded()
+                }
+
+                when (dbResult) {
+                    is DbInitResult.Success -> {
+                        Log.i(TAG, "Database initialized with ${dbResult.entriesAdded} entries from ${dbResult.sourcesProcessed} sources in ${dbResult.initializationTimeMs}ms")
+                        updateInitProgress(InitializationPhase.INITIALIZING_DATABASE, 0.7f, "Knowledge base ready (${dbResult.entriesAdded} entries loaded)")
+                    }
+                    is DbInitResult.AlreadyInitialized -> {
+                        Log.i(TAG, "Database was already initialized")
+                        updateInitProgress(InitializationPhase.INITIALIZING_DATABASE, 0.7f, "Knowledge base already initialized")
+                    }
+                    is DbInitResult.Error -> {
+                        Log.e(TAG, "Database initialization failed: ${dbResult.message}")
+                        setInitializationError("Database Failed", dbResult.message)
+                        return@launch
+                    }
+                }
+
+                // Debug: Check what's actually in the database
+                launch(Dispatchers.IO) {
+                    app.knowledgeBase.debugDatabaseContent()
                 }
 
                 // Step 5: Initialize the main Gemma AI Model (70-90%)
@@ -220,7 +242,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 // Transition to showing the main navigation with model loading dialog
                 _uiState.update { it.copy(
-                    initState = InitializationState.SUCCESS, // Set to SUCCESS early like original
+                    initState = InitializationState.SUCCESS, // Set to SUCCESS early
                     showInitializationProgress = false, // Hide initialization progress
                     isModelReloading = true, // Show model loading dialog
                     reloadProgress = 0f
@@ -247,6 +269,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 _uiState.update { it.copy(currentModelConfig = modelConfig) }
 
+                // Model initialization already happens on IO thread inside GemmaModelManager
                 when (val modelResult = app.gemmaModelManager.initializeModel(modelConfig)) {
                     is ModelInitResult.Error -> {
                         _uiState.update { it.copy(
@@ -265,12 +288,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 // Step 6: Initialize all application services (90-100%)
                 Log.d(TAG, "Step 6: Eagerly initializing core services...")
+                updateInitProgress(InitializationPhase.INITIALIZING_SERVICES, 0.9f, "Starting services...")
 
-                app.translationService
-                app.imageAnalysisService
+                // Service initialization is lightweight, but let's be safe
+                withContext(Dispatchers.IO) {
+                    app.translationService
+                    app.imageAnalysisService
+                }
+
                 Log.i(TAG, "All services are ready.")
 
                 // Step 7: Finalize initialization (100%)
+                updateInitProgress(InitializationPhase.COMPLETED, 1.0f, "Setup complete!")
                 Log.i(TAG, "App initialization completed successfully.")
 
                 _uiState.update {
@@ -493,7 +522,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Add this function to load generation params
     private fun loadGenerationParams(): GenerationParams {
         return GenerationParams(
             temperature = sharedPrefs.getFloat("temperature", 0.7f),
@@ -503,15 +531,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    private fun checkAllModelStatuses() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val app = getApplication<CrisisCoachApplication>()
-            val statuses = ModelVariant.entries.associateWith { variant ->
-                val modelPath = app.gemmaModelManager.modelLoader.getInternalModelPath(variant)
-                app.gemmaModelManager.modelLoader.isValidModelFile(modelPath)
-            }
-            _uiState.update { it.copy(modelDownloadStatus = statuses) }
+    private suspend fun checkAllModelStatuses() {
+        val app = getApplication<CrisisCoachApplication>()
+        val statuses = ModelVariant.entries.associateWith { variant ->
+            val modelPath = app.gemmaModelManager.modelLoader.getInternalModelPath(variant)
+            app.gemmaModelManager.modelLoader.isValidModelFile(modelPath)
         }
+        _uiState.update { it.copy(modelDownloadStatus = statuses) }
     }
 
     fun startModelDownload(modelVariant: ModelVariant) {

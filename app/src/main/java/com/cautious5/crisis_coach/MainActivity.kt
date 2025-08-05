@@ -36,7 +36,7 @@ class MainActivity : ComponentActivity() {
         permissionManager = PermissionManager(this)
 
         splashScreen.setKeepOnScreenCondition {
-            mainViewModel.uiState.value.initState == MainViewModel.InitializationState.LOADING
+            mainViewModel.uiState.value.showInitializationProgress
         }
 
         val authActivityLauncher = registerForActivityResult(
