@@ -1,5 +1,4 @@
 # Crisis Coach
----
 
 *Your On-Device AI Partner for Mission-Critical Emergency Response*
 
