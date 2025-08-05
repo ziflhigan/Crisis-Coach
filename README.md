@@ -44,7 +44,7 @@ You can experience Crisis Coach by downloading the latest APK from our releases 
 For detailed installation instructions, technical implementation details, and a guide to the app's features, please visit our project wiki. We also have a comprehensive technical write-up on our blog that explains the end-to-end development journey.
 
 * **Project Wiki:** [https://github.com/ziflhigan/Crisis-Coach/wiki/Model-Setup-Instructions](https://github.com/ziflhigan/Crisis-Coach/wiki/Model-Setup-Instructions-(Only-if-Building-APK-From-Source))
-* **Technical Blog Post:** 
+* **Technical Blog Post:** [https://thecurious5crisisicoach.hashnode.dev/crisis-coach-a-technical-writeup-by-team-the-cautious-5](https://thecurious5crisisicoach.hashnode.dev/crisis-coach-a-technical-writeup-by-team-the-cautious-5) 
 
 ## Technology Highlights
 
