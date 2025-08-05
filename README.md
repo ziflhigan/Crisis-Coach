@@ -82,6 +82,11 @@ This project would not be possible without the incredible open-source tools and 
 * **Competition:** [Google Gemma 3n Hackathon](https://www.kaggle.com/competitions/google-gemma-3n-hackathon/overview)
 * **Model:** [Gemma 3n by Google AI](https://ai.google.dev/gemma/docs/gemma-3n)
 * **Runtime:** [Google AI Edge](https://ai.google.dev/edge)
+
+## Appendix
+### Overview Sequence Diagram
+<img width="3840" height="3681" alt="cc-overview-sequence" src="https://github.com/user-attachments/assets/8fd275a3-e2f8-4b72-b2fc-ac92f1da0cd3" />
+
 -----
 
 *This project was developed by **the cautious 5**.*
