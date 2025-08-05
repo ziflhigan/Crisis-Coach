@@ -39,7 +39,7 @@ The application is currently available for Android, with an iOS version planned 
 
 You can experience Crisis Coach by downloading the latest APK from our releases page.
 
-* **Download the latest version here: [Download Here](https://www.google.com/search?q=link_to_github_release_page)**
+* **Download the latest version here: [Download Here](https://github.com/ziflhigan/Crisis-Coach/releases/download/v1.0.0/crisis-coach-preview.apk)**
 
 For detailed installation instructions, technical implementation details, and a guide to the app's features, please visit our project wiki. We also have a comprehensive technical write-up on our blog that explains the end-to-end development journey.
 
