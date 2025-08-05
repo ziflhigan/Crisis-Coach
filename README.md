@@ -11,16 +11,20 @@ even when infrastructure is compromised.
 The application is currently available for Android, with an iOS version planned for future release.
 
 ## Overview
+![overview-cc](https://github.com/user-attachments/assets/b9855eb3-c436-4a06-95e6-0bdc58ebd391)
+![settings-tab](https://github.com/user-attachments/assets/4652bcb4-f7d6-4e1c-91b9-db66eef9dbf6)
 
 
 ## Translation
+![Translatation](https://github.com/user-attachments/assets/1d1fccf8-7744-4f5b-9c44-e4d6294a649a)
 
 
 ## Image Triage Analysis
+![Image Analysis](https://github.com/user-attachments/assets/b255ff6c-893a-4eb3-af5b-771c9a96bb9c)
 
 
 ## On-Device Knowledge Access
-
+![Knowledge](https://github.com/user-attachments/assets/2bcf81aa-877a-48e5-8d1b-c737ffb739e0)
 
 
 ## Core Features
