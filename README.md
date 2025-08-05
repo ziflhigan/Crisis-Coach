@@ -39,7 +39,7 @@ The application is currently available for Android, with an iOS version planned 
 
 You can experience Crisis Coach by downloading the latest APK from our releases page.
 
-Note: A device with Android 15 and higher along with 6GB of RAM or higher is recommended for an ideal experience.
+Note: A device with Android 15 and above, with ≥6GB of RAM is recommended for an ideal experience.
 
 * **Download the latest version here: [Download Here](https://github.com/ziflhigan/Crisis-Coach/releases/download/v1.0.0/crisis-coach-preview.apk)**
 
