@@ -84,4 +84,4 @@ This project would not be possible without the incredible open-source tools and 
 * **Runtime:** [Google AI Edge](https://ai.google.dev/edge)
 -----
 
-*This project was developed by **the cautious 5**, a team of undergraduate students from **University of Malaya** majoring in AI.*
+*This project was developed by **the cautious 5**. *
