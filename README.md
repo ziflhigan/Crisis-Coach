@@ -27,6 +27,10 @@ The application is currently available for Android, with an iOS version planned 
 ![Knowledge](https://github.com/user-attachments/assets/2bcf81aa-877a-48e5-8d1b-c737ffb739e0)
 
 
+## Video Demo
+https://github.com/user-attachments/assets/3796000b-3e45-47d6-a66a-8f8e55b6ab28
+
+
 ## Core Features
 
 * **100% Offline Functionality:** All AI processing, from language translation to image analysis, happens locally. No cloud calls, no internet dependency, ensuring absolute reliability and data privacy.
